@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -115,6 +115,8 @@ jobs:
       - run: npm run artifacts
       - run: npm config set provenance true
       - run: npm publish --access public
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   registry-smoke:
     name: Registry smoke ${{ matrix.target }}
