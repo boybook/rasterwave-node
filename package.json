@@ -1,8 +1,14 @@
 {
   "name": "rasterwave-node",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
-  "keywords": ["sstv", "radiofax", "wefax", "ham-radio", "node-api"],
+  "keywords": [
+    "sstv",
+    "radiofax",
+    "wefax",
+    "ham-radio",
+    "node-api"
+  ],
   "author": "boybook",
   "main": "index.js",
   "types": "index.d.ts",
@@ -25,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/boybook/rasterwave-node"
+    "url": "git+https://github.com/boybook/rasterwave-node.git"
   },
   "homepage": "https://github.com/boybook/rasterwave-node#readme",
   "bugs": "https://github.com/boybook/rasterwave-node/issues",

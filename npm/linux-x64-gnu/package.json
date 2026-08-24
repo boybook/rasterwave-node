@@ -1,6 +1,6 @@
 {
   "name": "rasterwave-node-linux-x64-gnu",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "cpu": [
     "x64"
   ],
@@ -9,6 +9,14 @@
     "rasterwave-node.linux-x64-gnu.node"
   ],
   "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
+  "keywords": [
+    "sstv",
+    "radiofax",
+    "wefax",
+    "ham-radio",
+    "node-api"
+  ],
+  "author": "boybook",
   "homepage": "https://github.com/boybook/rasterwave-node#readme",
   "license": "MIT",
   "engines": {
@@ -16,9 +24,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/boybook/rasterwave-node"
+    "url": "git+https://github.com/boybook/rasterwave-node.git"
   },
   "bugs": "https://github.com/boybook/rasterwave-node/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "os": [
     "linux"
   ],
