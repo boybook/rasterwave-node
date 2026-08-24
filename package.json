@@ -1,0 +1,63 @@
+{
+  "name": "rasterwave-node",
+  "version": "0.0.1",
+  "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
+  "keywords": ["sstv", "radiofax", "wefax", "ham-radio", "node-api"],
+  "author": "boybook",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "import": "./index.js"
+    }
+  },
+  "napi": {
+    "binaryName": "rasterwave-node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boybook/rasterwave-node"
+  },
+  "homepage": "https://github.com/boybook/rasterwave-node#readme",
+  "bugs": "https://github.com/boybook/rasterwave-node/issues",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20.17"
+  },
+  "files": [
+    "index.js",
+    "native.js",
+    "index.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release --js native.js --dts native.d.ts",
+    "build:debug": "napi build --platform --js native.js --dts native.d.ts",
+    "create:npm-dirs": "napi create-npm-dirs",
+    "prepublishOnly": "napi pre-publish -t npm",
+    "test": "node --test test/*.test.js",
+    "test:types": "tsc --noEmit -p test/tsconfig.json",
+    "check": "npm run test && npm run test:types"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.8.6",
+    "typescript": "5.9.2"
+  },
+  "optionalDependencies": {}
+}

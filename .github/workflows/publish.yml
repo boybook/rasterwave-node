@@ -1,0 +1,155 @@
+name: Publish npm
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  DEBUG: napi:*
+
+jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: npm ci
+      - run: node scripts/check-release-version.mjs
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: macos-15-intel
+            target: x86_64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - run: npm run build -- --target ${{ matrix.target }}
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: rasterwave-node.*.node
+          if-no-files-found: error
+
+  test:
+    name: Test ${{ matrix.target }}
+    needs: build
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: macos-15-intel
+            target: x86_64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: .
+      - run: npm test
+
+  publish:
+    name: Publish packages
+    needs: test
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm install --global npm@11.16.0
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: npm run artifacts
+      - run: npm config set provenance true
+      - run: npm publish --access public
+
+  registry-smoke:
+    name: Registry smoke ${{ matrix.target }}
+    needs: publish
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: darwin-arm64
+          - host: macos-15-intel
+            target: darwin-x64
+          - host: ubuntu-latest
+            target: linux-x64-gnu
+          - host: ubuntu-24.04-arm
+            target: linux-arm64-gnu
+          - host: windows-latest
+            target: win32-x64-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Wait for registry and install
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in {1..18}; do
+            if npm view "rasterwave-node@$version" version >/dev/null 2>&1; then break; fi
+            if [ "$attempt" = 18 ]; then exit 1; fi
+            sleep 10
+          done
+          mkdir registry-smoke
+          cd registry-smoke
+          npm init -y
+          npm install "rasterwave-node@$version"
+          node -e "const r=require('rasterwave-node'); if(r.sstvModes().length!==31) process.exit(1)"

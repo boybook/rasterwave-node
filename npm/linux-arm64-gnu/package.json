@@ -1,0 +1,28 @@
+{
+  "name": "rasterwave-node-linux-arm64-gnu",
+  "version": "0.0.1",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "rasterwave-node.linux-arm64-gnu.node",
+  "files": [
+    "rasterwave-node.linux-arm64-gnu.node"
+  ],
+  "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
+  "homepage": "https://github.com/boybook/rasterwave-node#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.17"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boybook/rasterwave-node"
+  },
+  "bugs": "https://github.com/boybook/rasterwave-node/issues",
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

@@ -1,0 +1,26 @@
+[package]
+name = "rasterwave-node"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/boybook/rasterwave-node"
+description = "Native Node.js bindings for streaming SSTV and radiofax codecs"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3.12", default-features = false, features = ["dyn-symbols", "napi8"] }
+napi-derive = "3.6"
+rasterwave = "=0.1.0"
+rayon = "1.11"
+
+[build-dependencies]
+napi-build = "2.4"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+codegen-units = 1

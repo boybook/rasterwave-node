@@ -1,0 +1,25 @@
+{
+  "name": "rasterwave-node-win32-x64-msvc",
+  "version": "0.0.1",
+  "cpu": [
+    "x64"
+  ],
+  "main": "rasterwave-node.win32-x64-msvc.node",
+  "files": [
+    "rasterwave-node.win32-x64-msvc.node"
+  ],
+  "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
+  "homepage": "https://github.com/boybook/rasterwave-node#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.17"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boybook/rasterwave-node"
+  },
+  "bugs": "https://github.com/boybook/rasterwave-node/issues",
+  "os": [
+    "win32"
+  ]
+}
