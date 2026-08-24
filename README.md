@@ -42,6 +42,11 @@ Set `immediateDecode: true` together with `manualMode` to start a forced SSTV
 preview with the first PCM sample. All built-in SSTV modes support this path;
 later sync pulses still correct clock, phase, and frequency offset.
 
+Set `outputMode: 'continuousPaper'` for a receiver-style paper raster. Auto
+prints Robot 36 Color rows immediately while VIS and sync acquisition run in
+parallel. Trusted boundaries open protocol captures, but paper row numbers keep
+growing after `transmissionCompleted`.
+
 ## Streaming SSTV encode
 
 ```js
@@ -71,6 +76,11 @@ framing parameters. Both FM and AM subcarriers are supported.
 It begins raster output without waiting for APT/phasing and continues through
 weak signal intervals, which supports joining a weatherfax transmission in
 progress.
+
+With `outputMode: 'continuousPaper'`, fax starts from IOC576/120 LPM/FM (or the
+provided fallback), evaluates IOC/LPM and FM/AM acquisition in parallel, and
+continues printing after confirmed APT stop. `markSignalLost()` inserts a
+discontinuity boundary instead of completing a page in this mode.
 
 ```js
 const { FaxEncoder, FaxIoc } = require('rasterwave-node')

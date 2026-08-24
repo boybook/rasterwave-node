@@ -179,6 +179,8 @@ pub fn sstv_modes() -> Result<Vec<SstvModeInfo>> {
 #[napi(object)]
 #[derive(Clone)]
 pub struct SstvDecoderOptions {
+    pub output_mode: Option<String>,
+    pub fallback_mode: Option<JsSstvMode>,
     pub immediate_decode: Option<bool>,
     pub detect_vis: Option<bool>,
     pub detect_sync_timing: Option<bool>,
@@ -245,6 +247,9 @@ pub struct FaxEncoderOptions {
 #[napi(object)]
 #[derive(Clone)]
 pub struct FaxDecoderOptions {
+    pub output_mode: Option<String>,
+    pub continuous_auto: Option<bool>,
+    pub auto_am_modulation: Option<FaxModulationOptions>,
     pub immediate_decode: Option<bool>,
     pub ioc: Option<JsFaxIoc>,
     pub lpm: Option<u32>,

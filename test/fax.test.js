@@ -96,3 +96,63 @@ test('immediateDecode starts a fixed profile and emits rows without APT', async 
   assert.ok(!events.some(event => event.type === 'aptDetected'))
   await decoder.dispose()
 })
+
+test('continuousPaper fax prints without APT and signal loss only inserts a boundary', async () => {
+  const events = []
+  const decoder = new FaxDecoder(12000, {
+    outputMode: 'continuousPaper',
+    continuousAuto: false,
+    ioc: FaxIoc.Ioc576,
+    lpm: 120,
+    minimumSignalLevel: 0,
+    minimumCarrierCoherence: 0,
+  }, event => events.push(event))
+
+  assert.equal(decoder.pushF32(new Float32Array(6002)), true)
+  assert.ok(decoder.drain() instanceof Promise)
+  await decoder.drain()
+  assert.equal(decoder.markSignalLost(), true)
+  await decoder.drain()
+
+  assert.equal(events[0].type, 'paperStarted')
+  assert.ok(events.some(event => event.type === 'rasterLineReady'))
+  assert.ok(events.some(event => event.type === 'rasterBoundary' && event.boundaryKind === 'discontinuity'))
+  assert.ok(!events.some(event => event.type === 'transmissionCompleted'))
+  await decoder.dispose()
+})
+
+test('continuousPaper fax self-decodes APT start and stop', async () => {
+  const width = 864
+  const height = 4
+  const spec = {
+    ioc: FaxIoc.Ioc288,
+    lpm: 240,
+    phasingSeconds: 3,
+    startSeconds: 1,
+    stopSeconds: 2,
+    trailingBlackSeconds: 0.1,
+  }
+  const audio = await encodeFax(faxPattern(width, height), width, height, spec)
+  const events = []
+  const decoder = new FaxDecoder(12000, {
+    outputMode: 'continuousPaper',
+    continuousAuto: true,
+    ioc: FaxIoc.Ioc288,
+    lpm: 240,
+    expectedPhasingSeconds: 3,
+    aptConfirmSeconds: 0.5,
+    acquisitionTimeoutSeconds: 10,
+    stopConfirmSeconds: 0.5,
+    signalLossSeconds: 3,
+    minimumCarrierCoherence: 0,
+  }, event => events.push(event))
+  await pushAll(decoder, audio)
+  await decoder.drain()
+
+  const boundary = events.find(event => event.type === 'rasterBoundary' && event.boundaryKind === 'aptPhasing' && event.trusted)
+  const completed = events.find(event => event.type === 'transmissionCompleted')
+  assert.equal(boundary.ioc, FaxIoc.Ioc288)
+  assert.equal(completed.boundaryId, boundary.boundaryId)
+  assert.equal(completed.endLine - completed.startLine, completed.lines)
+  await decoder.dispose()
+})

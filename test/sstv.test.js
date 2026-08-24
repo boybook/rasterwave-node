@@ -77,3 +77,54 @@ test('immediateDecode starts a fixed mode and emits rows without VIS or sync', a
   assert.ok(events.some(event => event.type === 'lineReady'))
   await decoder.dispose()
 })
+
+test('continuousPaper prints fallback rows, captures VIS, and continues after completion', async () => {
+  const mode = SstvMode.Robot8Bw
+  const info = sstvModes().find(item => item.mode === mode)
+  const audio = await encodeSstv(pattern(info.width, info.height, false), mode)
+  const events = []
+  const decoder = new SstvDecoder(12000, {
+    outputMode: 'continuousPaper',
+    fallbackMode: SstvMode.Robot36,
+  }, event => events.push(event))
+  const prefix = new Float32Array(Math.ceil(info.lineSeconds * 12000 * 2.2))
+  const accepted = decoder.pushF32(prefix)
+  assert.equal(accepted, true)
+  assert.equal(typeof accepted, 'boolean')
+  await decoder.drain()
+  await pushAll(decoder, audio)
+  const completionIndex = events.findIndex(event => event.type === 'transmissionCompleted')
+  await pushAll(decoder, new Float32Array(Math.ceil(info.lineSeconds * 12000 * 2.2)))
+  await decoder.drain()
+
+  assert.equal(events[0].type, 'paperStarted')
+  assert.equal(events[0].mode, SstvMode.Robot36)
+  const boundary = events.find(event => event.type === 'rasterBoundary' && event.trusted)
+  const completed = events.find(event => event.type === 'transmissionCompleted')
+  assert.equal(boundary.mode, mode)
+  assert.equal(completed.boundaryId, boundary.boundaryId)
+  assert.equal(completed.endLine - completed.startLine, info.height)
+  assert.ok(events.slice(completionIndex + 1).some(event => event.type === 'rasterLineReady' && event.lineIndex >= completed.endLine))
+  await decoder.dispose()
+})
+
+test('continuousPaper manual SSTV does not complete at nominal height', async () => {
+  const mode = SstvMode.Robot8Bw
+  const info = sstvModes().find(item => item.mode === mode)
+  const events = []
+  const decoder = new SstvDecoder(12000, {
+    outputMode: 'continuousPaper',
+    manualMode: mode,
+    detectVis: false,
+    detectSyncTiming: false,
+    minimumSignalLevel: 0,
+  }, event => events.push(event))
+  const duration = info.lineSeconds * info.height * 2.05
+  await pushAll(decoder, new Float32Array(Math.ceil(duration * 12000)))
+  await decoder.drain()
+
+  const maxLine = Math.max(...events.filter(event => event.type === 'rasterLineReady').map(event => event.lineIndex))
+  assert.ok(maxLine >= info.height * 2 - 2)
+  assert.ok(!events.some(event => event.type === 'transmissionCompleted'))
+  await decoder.dispose()
+})

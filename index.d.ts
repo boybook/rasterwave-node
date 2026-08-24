@@ -19,7 +19,11 @@ export interface SstvModeInfo {
   scanLayout: 'monochrome' | 'martin' | 'scottie' | 'robot' | 'pd' | 'wraase' | 'pasokon'
   lineSeconds: number; rowsPerLine: number; status: 'canonical' | 'compatibility'
 }
+export type DecoderOutputMode = 'framed' | 'continuousPaper'
+export type PaperBoundaryKind = 'initial' | 'vis' | 'syncTiming' | 'aptPhasing' | 'protocolEnd' | 'discontinuity' | 'reset' | 'unknown'
 export interface SstvDecoderOptions {
+  outputMode?: DecoderOutputMode
+  fallbackMode?: SstvMode
   immediateDecode?: boolean
   detectVis?: boolean; detectSyncTiming?: boolean; manualMode?: SstvMode
   minimumSignalLevel?: number; queueCapacitySamples?: number
@@ -27,6 +31,11 @@ export interface SstvDecoderOptions {
 export interface SstvEncoderOptions { amplitude?: number; toneOffsetHz?: number; includeVisHeader?: boolean }
 
 export type SstvDecodeEvent =
+  | { type: 'paperStarted'; paperId: number; mode: SstvMode; width: number }
+  | { type: 'rasterBoundary'; paperId: number; boundaryId: number; lineIndex: number; mode: SstvMode; detection?: 'vis' | 'syncTiming' | 'manual' | 'unknown'; visCode?: number; ambiguous?: boolean; candidateCount?: number; boundaryKind: PaperBoundaryKind; trusted: boolean; width: number; nominalHeight: number }
+  | { type: 'rasterLineReady'; paperId: number; boundaryId: number; lineIndex: number; modeLineIndex: number; mode: SstvMode; revision: number; completeness: 'provisional' | 'final'; pixels: Uint8Array }
+  | { type: 'transmissionCompleted'; paperId: number; boundaryId: number; startLine: number; endLine: number; mode: SstvMode; lines: number }
+  | { type: 'protocolObserved'; mode: SstvMode; detection: 'vis' | 'syncTiming' | 'manual' | 'unknown'; visCode?: number; ambiguous?: boolean; candidateCount?: number; trusted: boolean }
   | { type: 'modeCandidate'; candidates: SstvMode[]; confidence: number }
   | { type: 'imageStarted'; imageId: number; mode: SstvMode; detection: 'vis' | 'syncTiming' | 'manual' | 'unknown'; visCode?: number; ambiguous?: boolean; candidateCount?: number; frequencyOffsetHz: number; width: number; height: number }
   | { type: 'lineReady'; imageId: number; mode: SstvMode; lineIndex: number; revision: number; completeness: 'provisional' | 'final'; pixels: Uint8Array }
@@ -69,6 +78,9 @@ export interface FaxSpecOptions {
 }
 export interface FaxEncoderOptions { amplitude?: number; includeApt?: boolean; includePhasing?: boolean }
 export interface FaxDecoderOptions {
+  outputMode?: DecoderOutputMode
+  continuousAuto?: boolean
+  autoAmModulation?: FaxModulationOptions
   immediateDecode?: boolean
   ioc?: FaxIoc; lpm?: number; modulation?: FaxModulationOptions; maxLines?: number
   amFullScale?: number; expectedPhasingSeconds?: number; aptConfirmSeconds?: number
@@ -76,6 +88,11 @@ export interface FaxDecoderOptions {
   minimumSignalLevel?: number; minimumCarrierCoherence?: number; queueCapacitySamples?: number
 }
 export type FaxDecodeEvent =
+  | { type: 'paperStarted'; paperId: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am' }
+  | { type: 'rasterBoundary'; paperId: number; boundaryId: number; lineIndex: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; boundaryKind: PaperBoundaryKind; trusted: boolean }
+  | { type: 'rasterLineReady'; paperId: number; boundaryId: number; lineIndex: number; segmentLineIndex: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; pixels: Uint8Array }
+  | { type: 'transmissionCompleted'; paperId: number; boundaryId: number; startLine: number; endLine: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; lines: number; partial: false }
+  | { type: 'protocolObserved'; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; trusted: boolean }
   | { type: 'aptDetected'; ioc: FaxIoc }
   | { type: 'phasingLocked'; ioc: FaxIoc; lpm: number; width: number }
   | { type: 'pageStarted'; pageId: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am' }

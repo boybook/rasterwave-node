@@ -10,8 +10,8 @@ import {
 
 const sstvEvents: SstvDecodeEvent[] = []
 const decoder = new SstvDecoder(12000, {
-  immediateDecode: true,
-  manualMode: SstvMode.Robot8Bw,
+  outputMode: 'continuousPaper',
+  fallbackMode: SstvMode.Robot36,
 }, event => sstvEvents.push(event))
 const accepted: boolean = decoder.pushF32(new Float32Array(10))
 void accepted
@@ -23,7 +23,8 @@ void samples
 
 const faxEvents: FaxDecodeEvent[] = []
 new FaxDecoder(12000, {
-  immediateDecode: true,
+  outputMode: 'continuousPaper',
+  continuousAuto: false,
   ioc: FaxIoc.Ioc288,
   lpm: 120,
 }, event => faxEvents.push(event))

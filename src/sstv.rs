@@ -9,7 +9,9 @@ use napi::{Error, JsDeferred, Result, Status};
 use napi_derive::napi;
 use rasterwave::{
     AbortReason, DecodeEvent, DecodeEventRef, DecoderConfig, DetectionSource, EncodeOptions,
-    LineCompleteness, RgbImage, SstvDecoder as CoreDecoder, SstvEncoder as CoreEncoder, SyncState,
+    LineCompleteness, PaperBoundaryKind, RgbImage, SstvDecoder as CoreDecoder,
+    SstvEncoder as CoreEncoder, SstvPaperConfig, SstvPaperDecoder, SstvPaperEvent,
+    SstvPaperEventRef, SstvPaperMode, SyncState,
 };
 
 use crate::runtime::{
@@ -26,6 +28,8 @@ type SamplesDeferred = JsDeferred<Float32Array, SamplesResolver>;
 pub struct SstvDecodeNotification {
     pub r#type: String,
     pub image_id: Option<f64>,
+    pub paper_id: Option<f64>,
+    pub boundary_id: Option<f64>,
     pub mode: Option<JsSstvMode>,
     pub candidates: Option<Vec<JsSstvMode>>,
     pub confidence: Option<f64>,
@@ -36,17 +40,28 @@ pub struct SstvDecodeNotification {
     pub frequency_offset_hz: Option<f64>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    pub line_index: Option<u32>,
+    pub line_index: Option<f64>,
+    pub mode_line_index: Option<u32>,
     pub revision: Option<u32>,
     pub completeness: Option<String>,
     pub pixels: Option<Uint8Array>,
     pub lines: Option<u32>,
     pub last_line: Option<u32>,
     pub reason: Option<String>,
+    pub boundary_kind: Option<String>,
+    pub trusted: Option<bool>,
+    pub nominal_height: Option<u32>,
+    pub start_line: Option<f64>,
+    pub end_line: Option<f64>,
+}
+
+enum CodecEvent {
+    Framed(DecodeEvent),
+    Paper(SstvPaperEvent),
 }
 
 enum OwnedNotification {
-    Codec(DecodeEvent),
+    Codec(CodecEvent),
     Drain,
     Finished,
     Error(String),
@@ -57,6 +72,8 @@ impl OwnedNotification {
         let mut output = SstvDecodeNotification {
             r#type: String::new(),
             image_id: None,
+            paper_id: None,
+            boundary_id: None,
             mode: None,
             candidates: None,
             confidence: None,
@@ -68,12 +85,18 @@ impl OwnedNotification {
             width: None,
             height: None,
             line_index: None,
+            mode_line_index: None,
             revision: None,
             completeness: None,
             pixels: None,
             lines: None,
             last_line: None,
             reason: None,
+            boundary_kind: None,
+            trusted: None,
+            nominal_height: None,
+            start_line: None,
+            end_line: None,
         };
         match self {
             Self::Drain => output.r#type = "drain".to_owned(),
@@ -82,7 +105,7 @@ impl OwnedNotification {
                 output.r#type = "error".to_owned();
                 output.reason = Some(reason);
             }
-            Self::Codec(event) => match event {
+            Self::Codec(CodecEvent::Framed(event)) => match event {
                 DecodeEvent::ModeCandidate {
                     candidates,
                     confidence,
@@ -140,7 +163,7 @@ impl OwnedNotification {
                     output.r#type = "lineReady".to_owned();
                     output.image_id = Some(safe_number(image_id, "imageId")?);
                     output.mode = Some(mode.try_into()?);
-                    output.line_index = Some(line_index);
+                    output.line_index = Some(f64::from(line_index));
                     output.revision = Some(revision);
                     output.completeness = Some(
                         match completeness {
@@ -195,8 +218,154 @@ impl OwnedNotification {
                     output.reason = Some("unsupported decoder event".to_owned());
                 }
             },
+            Self::Codec(CodecEvent::Paper(event)) => match event {
+                SstvPaperEvent::PaperStarted {
+                    paper_id,
+                    mode,
+                    width,
+                } => {
+                    output.r#type = "paperStarted".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.mode = Some(mode.try_into()?);
+                    output.width = Some(width);
+                }
+                SstvPaperEvent::Boundary {
+                    paper_id,
+                    boundary_id,
+                    line_index,
+                    mode,
+                    detection,
+                    kind,
+                    trusted,
+                    width,
+                    nominal_height,
+                } => {
+                    output.r#type = "rasterBoundary".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    output.line_index = Some(safe_number(line_index, "lineIndex")?);
+                    output.mode = Some(mode.try_into()?);
+                    if let Some(detection) = detection {
+                        apply_detection(&mut output, detection);
+                    }
+                    output.boundary_kind = Some(paper_boundary_name(kind).to_owned());
+                    output.trusted = Some(trusted);
+                    output.width = Some(width);
+                    output.nominal_height = Some(nominal_height);
+                }
+                SstvPaperEvent::ModeCandidate {
+                    candidates,
+                    confidence,
+                } => {
+                    output.r#type = "modeCandidate".to_owned();
+                    output.candidates = Some(
+                        candidates
+                            .into_iter()
+                            .map(JsSstvMode::try_from)
+                            .collect::<Result<_>>()?,
+                    );
+                    output.confidence = Some(f64::from(confidence));
+                }
+                SstvPaperEvent::LineReady {
+                    paper_id,
+                    boundary_id,
+                    line_index,
+                    mode_line_index,
+                    mode,
+                    revision,
+                    completeness,
+                    pixels,
+                } => {
+                    output.r#type = "rasterLineReady".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    output.line_index = Some(safe_number(line_index, "lineIndex")?);
+                    output.mode_line_index = Some(mode_line_index);
+                    output.mode = Some(mode.try_into()?);
+                    output.revision = Some(revision);
+                    output.completeness = Some(line_completeness_name(completeness).to_owned());
+                    let mut bytes = Vec::with_capacity(pixels.len() * 3);
+                    for pixel in pixels {
+                        bytes.extend_from_slice(&[pixel.r, pixel.g, pixel.b]);
+                    }
+                    output.pixels = Some(Uint8Array::new(bytes));
+                }
+                SstvPaperEvent::TransmissionCompleted {
+                    paper_id,
+                    boundary_id,
+                    start_line,
+                    end_line,
+                    mode,
+                    lines,
+                } => {
+                    output.r#type = "transmissionCompleted".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    output.start_line = Some(safe_number(start_line, "startLine")?);
+                    output.end_line = Some(safe_number(end_line, "endLine")?);
+                    output.mode = Some(mode.try_into()?);
+                    output.lines = Some(lines);
+                }
+                SstvPaperEvent::ProtocolObserved {
+                    mode,
+                    detection,
+                    trusted,
+                } => {
+                    output.r#type = "protocolObserved".to_owned();
+                    output.mode = Some(mode.try_into()?);
+                    apply_detection(&mut output, detection);
+                    output.trusted = Some(trusted);
+                }
+                SstvPaperEvent::SignalRejected { reason } => {
+                    output.r#type = "signalRejected".to_owned();
+                    output.reason = Some(reason.to_owned());
+                }
+                _ => {
+                    output.r#type = "error".to_owned();
+                    output.reason = Some("unsupported SSTV paper event".to_owned());
+                }
+            },
         }
         Ok(output)
+    }
+}
+
+fn apply_detection(output: &mut SstvDecodeNotification, detection: DetectionSource) {
+    match detection {
+        DetectionSource::Vis { code } => {
+            output.detection = Some("vis".to_owned());
+            output.vis_code = Some(u32::from(code));
+        }
+        DetectionSource::SyncTiming {
+            ambiguous,
+            candidate_count,
+        } => {
+            output.detection = Some("syncTiming".to_owned());
+            output.ambiguous = Some(ambiguous);
+            output.candidate_count = Some(u32::from(candidate_count));
+        }
+        DetectionSource::Manual => output.detection = Some("manual".to_owned()),
+        _ => output.detection = Some("unknown".to_owned()),
+    }
+}
+
+fn paper_boundary_name(kind: PaperBoundaryKind) -> &'static str {
+    match kind {
+        PaperBoundaryKind::Initial => "initial",
+        PaperBoundaryKind::Vis => "vis",
+        PaperBoundaryKind::SyncTiming => "syncTiming",
+        PaperBoundaryKind::AptPhasing => "aptPhasing",
+        PaperBoundaryKind::ProtocolEnd => "protocolEnd",
+        PaperBoundaryKind::Discontinuity => "discontinuity",
+        PaperBoundaryKind::Reset => "reset",
+        _ => "unknown",
+    }
+}
+
+fn line_completeness_name(value: LineCompleteness) -> &'static str {
+    match value {
+        LineCompleteness::Provisional => "provisional",
+        LineCompleteness::Final => "final",
     }
 }
 
@@ -219,7 +388,7 @@ struct DecoderQueue {
 }
 
 struct DecoderShared {
-    codec: Mutex<Option<CoreDecoder>>,
+    codec: Mutex<Option<DecoderBackend>>,
     queue: Mutex<DecoderQueue>,
     callback: EventCallback,
     queue_capacity_samples: usize,
@@ -227,6 +396,11 @@ struct DecoderShared {
     disposed: AtomicBool,
     failed: Arc<AtomicBool>,
     sync_state: AtomicU64,
+}
+
+enum DecoderBackend {
+    Framed(Box<CoreDecoder>),
+    Paper(Box<SstvPaperDecoder>),
 }
 
 #[napi]
@@ -243,6 +417,8 @@ impl SstvDecoder {
         on_event: Function<'_, SstvDecodeNotification, ()>,
     ) -> Result<Self> {
         let options = options.unwrap_or(SstvDecoderOptions {
+            output_mode: None,
+            fallback_mode: None,
             immediate_decode: None,
             detect_vis: None,
             detect_sync_timing: None,
@@ -250,19 +426,18 @@ impl SstvDecoder {
             minimum_signal_level: None,
             queue_capacity_samples: None,
         });
-        let mut config = DecoderConfig::default();
-        if let Some(value) = options.immediate_decode {
-            config.immediate_decode = value;
+        let output_mode = options.output_mode.as_deref().unwrap_or("framed");
+        if output_mode != "framed" && output_mode != "continuousPaper" {
+            return Err(error(
+                "RASTERWAVE_INVALID_CONFIG",
+                "outputMode must be 'framed' or 'continuousPaper'",
+            ));
         }
-        if let Some(value) = options.detect_vis {
-            config.detect_vis = value;
-        }
-        if let Some(value) = options.detect_sync_timing {
-            config.detect_sync_timing = value;
-        }
-        config.manual_mode = options.manual_mode.map(Into::into);
-        if let Some(value) = options.minimum_signal_level {
-            config.minimum_signal_level = value as f32;
+        if output_mode == "continuousPaper" && options.immediate_decode == Some(true) {
+            return Err(error(
+                "RASTERWAVE_INVALID_CONFIG",
+                "immediateDecode cannot be combined with continuousPaper",
+            ));
         }
         let capacity = options
             .queue_capacity_samples
@@ -273,8 +448,45 @@ impl SstvDecoder {
                 "queueCapacitySamples must be positive",
             ));
         }
-        let codec = CoreDecoder::new(input_sample_rate, config)
-            .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?;
+        let codec = if output_mode == "continuousPaper" {
+            let mode = match options.manual_mode {
+                Some(mode) => SstvPaperMode::Manual { mode: mode.into() },
+                None => SstvPaperMode::Auto {
+                    fallback: options.fallback_mode.unwrap_or(JsSstvMode::Robot36).into(),
+                },
+            };
+            DecoderBackend::Paper(Box::new(
+                SstvPaperDecoder::new(
+                    input_sample_rate,
+                    SstvPaperConfig {
+                        mode,
+                        detect_vis: options.detect_vis.unwrap_or(true),
+                        detect_sync_timing: options.detect_sync_timing.unwrap_or(true),
+                        minimum_signal_level: options.minimum_signal_level.unwrap_or(0.002) as f32,
+                    },
+                )
+                .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?,
+            ))
+        } else {
+            let mut config = DecoderConfig::default();
+            if let Some(value) = options.immediate_decode {
+                config.immediate_decode = value;
+            }
+            if let Some(value) = options.detect_vis {
+                config.detect_vis = value;
+            }
+            if let Some(value) = options.detect_sync_timing {
+                config.detect_sync_timing = value;
+            }
+            config.manual_mode = options.manual_mode.map(Into::into);
+            if let Some(value) = options.minimum_signal_level {
+                config.minimum_signal_level = value as f32;
+            }
+            DecoderBackend::Framed(Box::new(
+                CoreDecoder::new(input_sample_rate, config)
+                    .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?,
+            ))
+        };
         let callback = on_event
             .build_threadsafe_function::<OwnedNotification>()
             .max_queue_size::<64>()
@@ -548,12 +760,31 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            codec
-                .push_f32(&samples, &mut |event: DecodeEventRef<'_>| {
-                    emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-                })
-                .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
-            update_sync_state(shared, codec.sync_state());
+            let state = match codec {
+                DecoderBackend::Framed(codec) => {
+                    codec
+                        .push_f32(&samples, &mut |event: DecodeEventRef<'_>| {
+                            emit_notification(
+                                &callback_shared,
+                                OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                            );
+                        })
+                        .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+                    codec.sync_state()
+                }
+                DecoderBackend::Paper(codec) => {
+                    codec
+                        .push_f32(&samples, &mut |event: SstvPaperEventRef<'_>| {
+                            emit_notification(
+                                &callback_shared,
+                                OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                            );
+                        })
+                        .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+                    codec.sync_state()
+                }
+            };
+            update_sync_state(shared, state);
         }
         DecoderCommand::Reset => {
             let mut guard = shared.codec.lock().map_err(|_| lock_error())?;
@@ -561,10 +792,29 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            codec.reset_with_sink(&mut |event: DecodeEventRef<'_>| {
-                emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-            });
-            update_sync_state(shared, codec.sync_state());
+            let state = match codec {
+                DecoderBackend::Framed(codec) => {
+                    codec.reset_with_sink(&mut |event: DecodeEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                        );
+                    });
+                    codec.sync_state()
+                }
+                DecoderBackend::Paper(codec) => {
+                    codec
+                        .reset(&mut |event: SstvPaperEventRef<'_>| {
+                            emit_notification(
+                                &callback_shared,
+                                OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                            );
+                        })
+                        .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+                    codec.sync_state()
+                }
+            };
+            update_sync_state(shared, state);
         }
         DecoderCommand::Discontinuity(dropped) => {
             let mut guard = shared.codec.lock().map_err(|_| lock_error())?;
@@ -572,12 +822,31 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            codec
-                .mark_discontinuity(dropped, &mut |event: DecodeEventRef<'_>| {
-                    emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-                })
-                .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
-            update_sync_state(shared, codec.sync_state());
+            let state = match codec {
+                DecoderBackend::Framed(codec) => {
+                    codec
+                        .mark_discontinuity(dropped, &mut |event: DecodeEventRef<'_>| {
+                            emit_notification(
+                                &callback_shared,
+                                OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                            );
+                        })
+                        .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+                    codec.sync_state()
+                }
+                DecoderBackend::Paper(codec) => {
+                    codec
+                        .mark_discontinuity(dropped, &mut |event: SstvPaperEventRef<'_>| {
+                            emit_notification(
+                                &callback_shared,
+                                OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                            );
+                        })
+                        .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+                    codec.sync_state()
+                }
+            };
+            update_sync_state(shared, state);
         }
         DecoderCommand::Drain(deferred) => {
             emit_barrier(shared, OwnedNotification::Drain, deferred);
@@ -588,13 +857,27 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            if let Err(err) = codec.finish(&mut |event: DecodeEventRef<'_>| {
-                emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-            }) {
+            let result = match codec {
+                DecoderBackend::Framed(codec) => codec.finish(&mut |event: DecodeEventRef<'_>| {
+                    emit_notification(
+                        &callback_shared,
+                        OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                    );
+                }),
+                DecoderBackend::Paper(codec) => {
+                    codec.finish(&mut |event: SstvPaperEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                        );
+                    })
+                }
+            };
+            if let Err(err) = result {
                 deferred.reject(error("RASTERWAVE_DECODE_FAILED", err));
                 return Ok(());
             }
-            update_sync_state(shared, codec.sync_state());
+            update_sync_state(shared, SyncState::Finished);
             drop(guard);
             emit_barrier(shared, OwnedNotification::Finished, deferred);
         }

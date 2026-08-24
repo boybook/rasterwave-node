@@ -7,11 +7,14 @@ use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Error, JsDeferred, Result, Status};
 use napi_derive::napi;
-use rasterwave::GrayImage;
 use rasterwave::fax::{
     FaxDecodeEvent, FaxDecodeEventRef, FaxDecoder as CoreDecoder, FaxDecoderConfig,
     FaxEncodeOptions, FaxEncoder as CoreEncoder, FaxIoc, FaxLpm, FaxModulation, FaxPolarity,
     FaxSpec,
+};
+use rasterwave::{
+    FaxPaperConfig, FaxPaperDecoder, FaxPaperEvent, FaxPaperEventRef, FaxPaperMode, GrayImage,
+    PaperBoundaryKind,
 };
 
 use crate::runtime::{
@@ -31,20 +34,32 @@ type SamplesDeferred = JsDeferred<Float32Array, SamplesResolver>;
 pub struct FaxDecodeNotification {
     pub r#type: String,
     pub page_id: Option<f64>,
+    pub paper_id: Option<f64>,
+    pub boundary_id: Option<f64>,
     pub ioc: Option<JsFaxIoc>,
     pub lpm: Option<u32>,
     pub width: Option<u32>,
     pub active_width: Option<u32>,
     pub modulation: Option<String>,
-    pub line_index: Option<u32>,
+    pub line_index: Option<f64>,
+    pub segment_line_index: Option<u32>,
     pub pixels: Option<Uint8Array>,
     pub lines: Option<u32>,
     pub partial: Option<bool>,
     pub reason: Option<String>,
+    pub boundary_kind: Option<String>,
+    pub trusted: Option<bool>,
+    pub start_line: Option<f64>,
+    pub end_line: Option<f64>,
+}
+
+enum CodecEvent {
+    Framed(FaxDecodeEvent),
+    Paper(FaxPaperEvent),
 }
 
 enum OwnedNotification {
-    Codec(FaxDecodeEvent),
+    Codec(CodecEvent),
     Drain,
     Finished,
     Error(String),
@@ -55,16 +70,23 @@ impl OwnedNotification {
         let mut output = FaxDecodeNotification {
             r#type: String::new(),
             page_id: None,
+            paper_id: None,
+            boundary_id: None,
             ioc: None,
             lpm: None,
             width: None,
             active_width: None,
             modulation: None,
             line_index: None,
+            segment_line_index: None,
             pixels: None,
             lines: None,
             partial: None,
             reason: None,
+            boundary_kind: None,
+            trusted: None,
+            start_line: None,
+            end_line: None,
         };
         match self {
             Self::Drain => output.r#type = "drain".to_owned(),
@@ -73,7 +95,7 @@ impl OwnedNotification {
                 output.r#type = "error".to_owned();
                 output.reason = Some(reason);
             }
-            Self::Codec(event) => match event {
+            Self::Codec(CodecEvent::Framed(event)) => match event {
                 FaxDecodeEvent::AptDetected { ioc } => {
                     output.r#type = "aptDetected".to_owned();
                     output.ioc = Some(ioc.into());
@@ -100,7 +122,7 @@ impl OwnedNotification {
                 } => {
                     output.r#type = "lineReady".to_owned();
                     output.page_id = Some(safe_number(page_id, "pageId")?);
-                    output.line_index = Some(line_index);
+                    output.line_index = Some(f64::from(line_index));
                     output.pixels = Some(Uint8Array::new(pixels));
                 }
                 FaxDecodeEvent::PageCompleted {
@@ -122,8 +144,102 @@ impl OwnedNotification {
                     output.reason = Some("unsupported fax decoder event".to_owned());
                 }
             },
+            Self::Codec(CodecEvent::Paper(event)) => match event {
+                FaxPaperEvent::PaperStarted { paper_id, spec } => {
+                    output.r#type = "paperStarted".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    apply_spec(&mut output, spec);
+                }
+                FaxPaperEvent::Boundary {
+                    paper_id,
+                    boundary_id,
+                    line_index,
+                    spec,
+                    kind,
+                    trusted,
+                } => {
+                    output.r#type = "rasterBoundary".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    output.line_index = Some(safe_number(line_index, "lineIndex")?);
+                    apply_spec(&mut output, spec);
+                    output.boundary_kind = Some(paper_boundary_name(kind).to_owned());
+                    output.trusted = Some(trusted);
+                }
+                FaxPaperEvent::AptDetected { ioc } => {
+                    output.r#type = "aptDetected".to_owned();
+                    output.ioc = Some(ioc.into());
+                }
+                FaxPaperEvent::LineReady {
+                    paper_id,
+                    boundary_id,
+                    line_index,
+                    segment_line_index,
+                    spec,
+                    pixels,
+                } => {
+                    output.r#type = "rasterLineReady".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    output.line_index = Some(safe_number(line_index, "lineIndex")?);
+                    output.segment_line_index = Some(segment_line_index);
+                    apply_spec(&mut output, spec);
+                    output.pixels = Some(Uint8Array::new(pixels));
+                }
+                FaxPaperEvent::TransmissionCompleted {
+                    paper_id,
+                    boundary_id,
+                    start_line,
+                    end_line,
+                    spec,
+                    lines,
+                } => {
+                    output.r#type = "transmissionCompleted".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    output.start_line = Some(safe_number(start_line, "startLine")?);
+                    output.end_line = Some(safe_number(end_line, "endLine")?);
+                    apply_spec(&mut output, spec);
+                    output.lines = Some(lines);
+                    output.partial = Some(false);
+                }
+                FaxPaperEvent::ProtocolObserved { spec, trusted } => {
+                    output.r#type = "protocolObserved".to_owned();
+                    apply_spec(&mut output, spec);
+                    output.trusted = Some(trusted);
+                }
+                FaxPaperEvent::SignalRejected { reason } => {
+                    output.r#type = "signalRejected".to_owned();
+                    output.reason = Some(reason.to_owned());
+                }
+                _ => {
+                    output.r#type = "error".to_owned();
+                    output.reason = Some("unsupported fax paper event".to_owned());
+                }
+            },
         }
         Ok(output)
+    }
+}
+
+fn apply_spec(output: &mut FaxDecodeNotification, spec: FaxSpec) {
+    output.ioc = Some(spec.ioc.into());
+    output.lpm = Some(u32::from(spec.lpm.get()));
+    output.width = Some(spec.width());
+    output.active_width = Some(spec.active_width());
+    output.modulation = Some(modulation_name(spec.modulation).to_owned());
+}
+
+fn paper_boundary_name(kind: PaperBoundaryKind) -> &'static str {
+    match kind {
+        PaperBoundaryKind::Initial => "initial",
+        PaperBoundaryKind::Vis => "vis",
+        PaperBoundaryKind::SyncTiming => "syncTiming",
+        PaperBoundaryKind::AptPhasing => "aptPhasing",
+        PaperBoundaryKind::ProtocolEnd => "protocolEnd",
+        PaperBoundaryKind::Discontinuity => "discontinuity",
+        PaperBoundaryKind::Reset => "reset",
+        _ => "unknown",
     }
 }
 
@@ -146,13 +262,18 @@ struct DecoderQueue {
 }
 
 struct DecoderShared {
-    codec: Mutex<Option<CoreDecoder>>,
+    codec: Mutex<Option<DecoderBackend>>,
     queue: Mutex<DecoderQueue>,
     callback: EventCallback,
     queue_capacity_samples: usize,
     accepting: AtomicBool,
     disposed: AtomicBool,
     failed: Arc<AtomicBool>,
+}
+
+enum DecoderBackend {
+    Framed(Box<CoreDecoder>),
+    Paper(Box<FaxPaperDecoder>),
 }
 
 #[napi]
@@ -169,6 +290,9 @@ impl FaxDecoder {
         on_event: Function<'_, FaxDecodeNotification, ()>,
     ) -> Result<Self> {
         let options = options.unwrap_or(FaxDecoderOptions {
+            output_mode: None,
+            continuous_auto: None,
+            auto_am_modulation: None,
             immediate_decode: None,
             ioc: None,
             lpm: None,
@@ -184,40 +308,32 @@ impl FaxDecoder {
             minimum_carrier_coherence: None,
             queue_capacity_samples: None,
         });
-        let mut config = FaxDecoderConfig {
-            immediate_decode: options.immediate_decode.unwrap_or(false),
-            ioc: options.ioc.map(Into::into),
-            lpm: options.lpm.map(fax_lpm).transpose()?,
-            ..FaxDecoderConfig::default()
-        };
-        if let Some(value) = options.modulation {
-            config.modulation = fax_modulation(&value)?;
+        let output_mode = options.output_mode.as_deref().unwrap_or("framed");
+        if output_mode != "framed" && output_mode != "continuousPaper" {
+            return Err(error(
+                "RASTERWAVE_INVALID_CONFIG",
+                "outputMode must be 'framed' or 'continuousPaper'",
+            ));
         }
-        config.max_lines = options.max_lines;
-        if let Some(value) = options.am_full_scale {
-            config.am_full_scale = value as f32;
+        if output_mode == "continuousPaper" && options.immediate_decode == Some(true) {
+            return Err(error(
+                "RASTERWAVE_INVALID_CONFIG",
+                "immediateDecode cannot be combined with continuousPaper",
+            ));
         }
-        if options.expected_phasing_seconds.is_some() {
-            config.expected_phasing_seconds = options.expected_phasing_seconds.map(|v| v as f32);
+        if output_mode == "continuousPaper" && options.max_lines.is_some() {
+            return Err(error(
+                "RASTERWAVE_INVALID_CONFIG",
+                "maxLines cannot be combined with continuousPaper",
+            ));
         }
-        if let Some(value) = options.apt_confirm_seconds {
-            config.apt_confirm_seconds = value as f32;
-        }
-        if let Some(value) = options.acquisition_timeout_seconds {
-            config.acquisition_timeout_seconds = value as f32;
-        }
-        if let Some(value) = options.stop_confirm_seconds {
-            config.stop_confirm_seconds = value as f32;
-        }
-        if let Some(value) = options.signal_loss_seconds {
-            config.signal_loss_seconds = value as f32;
-        }
-        if let Some(value) = options.minimum_signal_level {
-            config.minimum_signal_level = value as f32;
-        }
-        if let Some(value) = options.minimum_carrier_coherence {
-            config.minimum_carrier_coherence = value as f32;
-        }
+        let parsed_ioc = options.ioc.map(Into::into);
+        let parsed_lpm = options.lpm.map(fax_lpm).transpose()?;
+        let parsed_modulation = options
+            .modulation
+            .as_ref()
+            .map(fax_modulation)
+            .transpose()?;
         let capacity = options
             .queue_capacity_samples
             .unwrap_or_else(|| input_sample_rate.saturating_mul(5));
@@ -227,8 +343,92 @@ impl FaxDecoder {
                 "queueCapacitySamples must be positive",
             ));
         }
-        let codec = CoreDecoder::new(input_sample_rate, config)
-            .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?;
+        let codec = if output_mode == "continuousPaper" {
+            let mut fallback = FaxSpec::standard(
+                parsed_ioc.unwrap_or(FaxIoc::Ioc576),
+                parsed_lpm.unwrap_or(FaxLpm::LPM_120),
+            );
+            fallback.modulation = parsed_modulation.unwrap_or(FaxModulation::WMO_FM);
+            let mode = if options.continuous_auto.unwrap_or(true) {
+                FaxPaperMode::Auto { fallback }
+            } else {
+                FaxPaperMode::Manual { spec: fallback }
+            };
+            let mut paper = FaxPaperConfig {
+                mode,
+                ..FaxPaperConfig::default()
+            };
+            if let Some(value) = options.auto_am_modulation.as_ref() {
+                paper.auto_am_modulation = fax_modulation(value)?;
+            }
+            if let Some(value) = options.am_full_scale {
+                paper.am_full_scale = value as f32;
+            }
+            if options.expected_phasing_seconds.is_some() {
+                paper.expected_phasing_seconds =
+                    options.expected_phasing_seconds.map(|value| value as f32);
+            }
+            if let Some(value) = options.apt_confirm_seconds {
+                paper.apt_confirm_seconds = value as f32;
+            }
+            if let Some(value) = options.acquisition_timeout_seconds {
+                paper.acquisition_timeout_seconds = value as f32;
+            }
+            if let Some(value) = options.stop_confirm_seconds {
+                paper.stop_confirm_seconds = value as f32;
+            }
+            if let Some(value) = options.signal_loss_seconds {
+                paper.signal_loss_seconds = value as f32;
+            }
+            if let Some(value) = options.minimum_signal_level {
+                paper.minimum_signal_level = value as f32;
+            }
+            if let Some(value) = options.minimum_carrier_coherence {
+                paper.minimum_carrier_coherence = value as f32;
+            }
+            DecoderBackend::Paper(Box::new(
+                FaxPaperDecoder::new(input_sample_rate, paper)
+                    .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?,
+            ))
+        } else {
+            let mut config = FaxDecoderConfig {
+                immediate_decode: options.immediate_decode.unwrap_or(false),
+                ioc: parsed_ioc,
+                lpm: parsed_lpm,
+                modulation: parsed_modulation.unwrap_or(FaxModulation::WMO_FM),
+                max_lines: options.max_lines,
+                ..FaxDecoderConfig::default()
+            };
+            if let Some(value) = options.am_full_scale {
+                config.am_full_scale = value as f32;
+            }
+            if options.expected_phasing_seconds.is_some() {
+                config.expected_phasing_seconds =
+                    options.expected_phasing_seconds.map(|value| value as f32);
+            }
+            if let Some(value) = options.apt_confirm_seconds {
+                config.apt_confirm_seconds = value as f32;
+            }
+            if let Some(value) = options.acquisition_timeout_seconds {
+                config.acquisition_timeout_seconds = value as f32;
+            }
+            if let Some(value) = options.stop_confirm_seconds {
+                config.stop_confirm_seconds = value as f32;
+            }
+            if let Some(value) = options.signal_loss_seconds {
+                config.signal_loss_seconds = value as f32;
+            }
+            if let Some(value) = options.minimum_signal_level {
+                config.minimum_signal_level = value as f32;
+            }
+            if let Some(value) = options.minimum_carrier_coherence {
+                config.minimum_carrier_coherence = value as f32;
+            }
+            DecoderBackend::Framed(Box::new(
+                CoreDecoder::new(input_sample_rate, config)
+                    .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?,
+            ))
+        };
         let callback = on_event
             .build_threadsafe_function::<OwnedNotification>()
             .max_queue_size::<64>()
@@ -478,18 +678,44 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            codec
-                .push_f32(&samples, &mut |event: FaxDecodeEventRef<'_>| {
-                    emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-                })
-                .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+            match codec {
+                DecoderBackend::Framed(codec) => codec
+                    .push_f32(&samples, &mut |event: FaxDecodeEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                        );
+                    })
+                    .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?,
+                DecoderBackend::Paper(codec) => codec
+                    .push_f32(&samples, &mut |event: FaxPaperEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                        );
+                    })
+                    .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?,
+            };
         }
         DecoderCommand::Reset => {
             let mut guard = shared.codec.lock().map_err(|_| lock_error())?;
-            guard
+            let codec = guard
                 .as_mut()
-                .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?
-                .reset();
+                .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
+            match codec {
+                DecoderBackend::Framed(codec) => codec.reset(),
+                DecoderBackend::Paper(codec) => {
+                    let callback_shared = shared.clone();
+                    codec
+                        .reset(&mut |event: FaxPaperEventRef<'_>| {
+                            emit_notification(
+                                &callback_shared,
+                                OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                            );
+                        })
+                        .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+                }
+            }
         }
         DecoderCommand::SignalLost => {
             let mut guard = shared.codec.lock().map_err(|_| lock_error())?;
@@ -497,11 +723,24 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            codec
-                .mark_signal_lost(&mut |event: FaxDecodeEventRef<'_>| {
-                    emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-                })
-                .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?;
+            match codec {
+                DecoderBackend::Framed(codec) => codec
+                    .mark_signal_lost(&mut |event: FaxDecodeEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                        );
+                    })
+                    .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?,
+                DecoderBackend::Paper(codec) => codec
+                    .mark_signal_lost(&mut |event: FaxPaperEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                        );
+                    })
+                    .map_err(|err| error("RASTERWAVE_DECODE_FAILED", err))?,
+            };
         }
         DecoderCommand::Drain(deferred) => {
             emit_barrier(shared, OwnedNotification::Drain, deferred);
@@ -512,9 +751,23 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
                 .as_mut()
                 .ok_or_else(|| error("RASTERWAVE_DISPOSED", "decoder is disposed"))?;
             let callback_shared = shared.clone();
-            if let Err(err) = codec.finish(&mut |event: FaxDecodeEventRef<'_>| {
-                emit_notification(&callback_shared, OwnedNotification::Codec(event.to_owned()));
-            }) {
+            let result = match codec {
+                DecoderBackend::Framed(codec) => {
+                    codec.finish(&mut |event: FaxDecodeEventRef<'_>| {
+                        emit_notification(
+                            &callback_shared,
+                            OwnedNotification::Codec(CodecEvent::Framed(event.to_owned())),
+                        );
+                    })
+                }
+                DecoderBackend::Paper(codec) => codec.finish(&mut |event: FaxPaperEventRef<'_>| {
+                    emit_notification(
+                        &callback_shared,
+                        OwnedNotification::Codec(CodecEvent::Paper(event.to_owned())),
+                    );
+                }),
+            };
+            if let Err(err) = result {
                 deferred.reject(error("RASTERWAVE_DECODE_FAILED", err));
                 return Ok(());
             }

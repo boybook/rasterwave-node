@@ -49,19 +49,29 @@ export interface EncoderProgressSnapshot {
 export interface FaxDecodeNotification {
   type: string
   pageId?: number
+  paperId?: number
+  boundaryId?: number
   ioc?: JsFaxIoc
   lpm?: number
   width?: number
   activeWidth?: number
   modulation?: string
   lineIndex?: number
+  segmentLineIndex?: number
   pixels?: Uint8Array
   lines?: number
   partial?: boolean
   reason?: string
+  boundaryKind?: string
+  trusted?: boolean
+  startLine?: number
+  endLine?: number
 }
 
 export interface FaxDecoderOptions {
+  outputMode?: string
+  continuousAuto?: boolean
+  autoAmModulation?: FaxModulationOptions
   immediateDecode?: boolean
   ioc?: FaxIoc
   lpm?: number
@@ -123,6 +133,8 @@ export interface FaxSpecOptions {
 export interface SstvDecodeNotification {
   type: string
   imageId?: number
+  paperId?: number
+  boundaryId?: number
   mode?: JsSstvMode
   candidates?: Array<JsSstvMode>
   confidence?: number
@@ -134,15 +146,23 @@ export interface SstvDecodeNotification {
   width?: number
   height?: number
   lineIndex?: number
+  modeLineIndex?: number
   revision?: number
   completeness?: string
   pixels?: Uint8Array
   lines?: number
   lastLine?: number
   reason?: string
+  boundaryKind?: string
+  trusted?: boolean
+  nominalHeight?: number
+  startLine?: number
+  endLine?: number
 }
 
 export interface SstvDecoderOptions {
+  outputMode?: string
+  fallbackMode?: SstvMode
   immediateDecode?: boolean
   detectVis?: boolean
   detectSyncTiming?: boolean

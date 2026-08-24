@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Add `continuousPaper` decoder backends for SSTV and radiofax while retaining
+  the framed API.
+- Expose monotonic raster rows, trusted boundaries, protocol completion ranges,
+  and manual mismatch observations as discriminated events.
+- Keep synchronous queue commands and native Promise barriers serialized by
+  the existing per-instance FIFO actor.
+
 ## 0.1.1
 
 - Add `immediateDecode` for forced SSTV reception in every built-in mode.
