@@ -38,6 +38,10 @@ await decoder.dispose()
 events are emitted while input is still arriving; `finish()` is not required
 before rows become available.
 
+Set `immediateDecode: true` together with `manualMode` to start a forced SSTV
+preview with the first PCM sample. All built-in SSTV modes support this path;
+later sync pulses still correct clock, phase, and frequency offset.
+
 ## Streaming SSTV encode
 
 ```js
@@ -62,6 +66,11 @@ Concurrent `readSamples()` calls are accepted and resolved in call order.
 `FaxDecoder` uses the same synchronous write and event callback model.
 `FaxEncoder` accepts packed grayscale pixels plus IOC, LPM, modulation, and
 framing parameters. Both FM and AM subcarriers are supported.
+
+`FaxDecoder` also accepts `immediateDecode: true` with fixed `ioc` and `lpm`.
+It begins raster output without waiting for APT/phasing and continues through
+weak signal intervals, which supports joining a weatherfax transmission in
+progress.
 
 ```js
 const { FaxEncoder, FaxIoc } = require('rasterwave-node')

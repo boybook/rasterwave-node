@@ -75,3 +75,24 @@ test('markSignalLost closes an active page as partial', async () => {
   assert.equal(events.find(event => event.type === 'pageCompleted').partial, true)
   await decoder.dispose()
 })
+
+test('immediateDecode starts a fixed profile and emits rows without APT', async () => {
+  const events = []
+  const decoder = new FaxDecoder(12000, {
+    immediateDecode: true,
+    ioc: FaxIoc.Ioc576,
+    lpm: 120,
+    minimumSignalLevel: 1,
+    minimumCarrierCoherence: 2,
+  }, event => events.push(event))
+
+  await pushAll(decoder, new Float32Array(6002))
+  await decoder.drain()
+
+  assert.equal(events[0].type, 'pageStarted')
+  assert.equal(events[0].ioc, FaxIoc.Ioc576)
+  assert.equal(events[0].lpm, 120)
+  assert.ok(events.some(event => event.type === 'lineReady'))
+  assert.ok(!events.some(event => event.type === 'aptDetected'))
+  await decoder.dispose()
+})

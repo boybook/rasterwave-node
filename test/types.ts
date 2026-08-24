@@ -9,7 +9,10 @@ import {
 } from '..'
 
 const sstvEvents: SstvDecodeEvent[] = []
-const decoder = new SstvDecoder(12000, null, event => sstvEvents.push(event))
+const decoder = new SstvDecoder(12000, {
+  immediateDecode: true,
+  manualMode: SstvMode.Robot8Bw,
+}, event => sstvEvents.push(event))
 const accepted: boolean = decoder.pushF32(new Float32Array(10))
 void accepted
 void decoder.drain()
@@ -19,4 +22,8 @@ const samples: Promise<Float32Array> = encoder.readSamples(4096)
 void samples
 
 const faxEvents: FaxDecodeEvent[] = []
-new FaxDecoder(12000, { ioc: FaxIoc.Ioc288 }, event => faxEvents.push(event))
+new FaxDecoder(12000, {
+  immediateDecode: true,
+  ioc: FaxIoc.Ioc288,
+  lpm: 120,
+}, event => faxEvents.push(event))

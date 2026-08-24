@@ -55,3 +55,25 @@ test('all modes construct and produce a first asynchronous PCM chunk', async () 
     await encoder.dispose()
   }
 })
+
+test('immediateDecode starts a fixed mode and emits rows without VIS or sync', async () => {
+  const info = sstvModes().find(item => item.mode === SstvMode.Robot36)
+  const events = []
+  const decoder = new SstvDecoder(12000, {
+    immediateDecode: true,
+    detectVis: false,
+    detectSyncTiming: false,
+    manualMode: SstvMode.Robot36,
+    minimumSignalLevel: 1,
+  }, event => events.push(event))
+  const silence = new Float32Array(Math.ceil(info.lineSeconds * 12000) + 2)
+
+  await pushAll(decoder, silence)
+  await decoder.drain()
+
+  assert.equal(events[0].type, 'imageStarted')
+  assert.equal(events[0].mode, SstvMode.Robot36)
+  assert.equal(events[0].detection, 'manual')
+  assert.ok(events.some(event => event.type === 'lineReady'))
+  await decoder.dispose()
+})

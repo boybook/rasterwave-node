@@ -20,6 +20,7 @@ export interface SstvModeInfo {
   lineSeconds: number; rowsPerLine: number; status: 'canonical' | 'compatibility'
 }
 export interface SstvDecoderOptions {
+  immediateDecode?: boolean
   detectVis?: boolean; detectSyncTiming?: boolean; manualMode?: SstvMode
   minimumSignalLevel?: number; queueCapacitySamples?: number
 }
@@ -68,6 +69,7 @@ export interface FaxSpecOptions {
 }
 export interface FaxEncoderOptions { amplitude?: number; includeApt?: boolean; includePhasing?: boolean }
 export interface FaxDecoderOptions {
+  immediateDecode?: boolean
   ioc?: FaxIoc; lpm?: number; modulation?: FaxModulationOptions; maxLines?: number
   amFullScale?: number; expectedPhasingSeconds?: number; aptConfirmSeconds?: number
   acquisitionTimeoutSeconds?: number; stopConfirmSeconds?: number; signalLossSeconds?: number

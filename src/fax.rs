@@ -169,6 +169,7 @@ impl FaxDecoder {
         on_event: Function<'_, FaxDecodeNotification, ()>,
     ) -> Result<Self> {
         let options = options.unwrap_or(FaxDecoderOptions {
+            immediate_decode: None,
             ioc: None,
             lpm: None,
             modulation: None,
@@ -184,6 +185,7 @@ impl FaxDecoder {
             queue_capacity_samples: None,
         });
         let mut config = FaxDecoderConfig {
+            immediate_decode: options.immediate_decode.unwrap_or(false),
             ioc: options.ioc.map(Into::into),
             lpm: options.lpm.map(fax_lpm).transpose()?,
             ..FaxDecoderConfig::default()

@@ -1,6 +1,6 @@
 {
   "name": "rasterwave-node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
   "keywords": [
     "sstv",

@@ -1,6 +1,6 @@
 [package]
 name = "rasterwave-node"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3.12", default-features = false, features = ["dyn-symbols", "napi8"] }
 napi-derive = "3.6"
-rasterwave = "=0.1.0"
+rasterwave = "=0.1.1"
 rayon = "1.11"
 
 [build-dependencies]

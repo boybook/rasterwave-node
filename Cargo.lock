@@ -260,16 +260,16 @@ dependencies = [
 
 [[package]]
 name = "rasterwave"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a93b490a9c70af017d9ad94451ae113067c1507b6d0f53a0a41e8727019c4a66"
+checksum = "5121110842572f14665b893a9e7333dd524b68e6830a0b4bd5d0fc8e92b78d98"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "rasterwave-node"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "napi",
  "napi-build",

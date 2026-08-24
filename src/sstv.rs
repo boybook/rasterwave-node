@@ -243,6 +243,7 @@ impl SstvDecoder {
         on_event: Function<'_, SstvDecodeNotification, ()>,
     ) -> Result<Self> {
         let options = options.unwrap_or(SstvDecoderOptions {
+            immediate_decode: None,
             detect_vis: None,
             detect_sync_timing: None,
             manual_mode: None,
@@ -250,6 +251,9 @@ impl SstvDecoder {
             queue_capacity_samples: None,
         });
         let mut config = DecoderConfig::default();
+        if let Some(value) = options.immediate_decode {
+            config.immediate_decode = value;
+        }
         if let Some(value) = options.detect_vis {
             config.detect_vis = value;
         }

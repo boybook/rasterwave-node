@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Add `immediateDecode` for forced SSTV reception in every built-in mode.
+- Add `immediateDecode` for fixed IOC/LPM radiofax reception without waiting
+  for APT or phasing.
+
 ## 0.1.0
 
 - First stable npm release of the complete streaming SSTV and radiofax bridge.

@@ -62,6 +62,7 @@ export interface FaxDecodeNotification {
 }
 
 export interface FaxDecoderOptions {
+  immediateDecode?: boolean
   ioc?: FaxIoc
   lpm?: number
   modulation?: FaxModulationOptions
@@ -142,6 +143,7 @@ export interface SstvDecodeNotification {
 }
 
 export interface SstvDecoderOptions {
+  immediateDecode?: boolean
   detectVis?: boolean
   detectSyncTiming?: boolean
   manualMode?: SstvMode
