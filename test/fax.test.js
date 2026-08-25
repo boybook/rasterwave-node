@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const test = require('node:test')
 
-const { FaxDecoder, FaxIoc } = require('..')
+const { FaxDecoder, FaxIoc, correctFaxPaper } = require('..')
 const { encodeFax, pushAll } = require('./helpers')
 
 function faxPattern(width, height) {
@@ -116,6 +116,7 @@ test('continuousPaper fax prints without APT and signal loss only inserts a boun
 
   assert.equal(events[0].type, 'paperStarted')
   assert.ok(events.some(event => event.type === 'rasterLineReady'))
+  assert.ok(events.filter(event => event.type === 'rasterLineReady').every(event => event.basis === 'nominalPaper'))
   assert.ok(events.some(event => event.type === 'rasterBoundary' && event.boundaryKind === 'discontinuity'))
   assert.ok(!events.some(event => event.type === 'transmissionCompleted'))
   await decoder.dispose()
@@ -151,8 +152,31 @@ test('continuousPaper fax self-decodes APT start and stop', async () => {
 
   const boundary = events.find(event => event.type === 'rasterBoundary' && event.boundaryKind === 'aptPhasing' && event.trusted)
   const completed = events.find(event => event.type === 'transmissionCompleted')
+  const calibration = events.find(event => event.type === 'clockCalibration')
   assert.equal(boundary.ioc, FaxIoc.Ioc288)
+  assert.equal(calibration.boundaryId, boundary.boundaryId)
+  assert.equal(decoder.clockState.revision, calibration.revision)
   assert.equal(completed.boundaryId, boundary.boundaryId)
   assert.equal(completed.endLine - completed.startLine, completed.lines)
   await decoder.dispose()
+})
+
+test('correctFaxPaper is a native Promise and corrects across row boundaries', async () => {
+  const input = Uint8Array.from({ length: 16 }, (_, index) => index)
+  const calibration = [{
+    revision: 1, referenceLine: 0, phasePixels: 1, clockPpm: 0,
+    confidence: 1, source: 'manual', status: 'locked',
+  }]
+  const promise = correctFaxPaper(input, 4, 4, 0, calibration)
+  assert.ok(promise instanceof Promise)
+  const output = await promise
+  assert.deepEqual(Array.from(output.slice(0, 8)), [255, 0, 1, 2, 3, 4, 5, 6])
+})
+
+test('large fax correction keeps the Node event loop responsive', async () => {
+  const input = new Uint8Array(1810 * 3000).fill(127)
+  let ticked = false
+  setImmediate(() => { ticked = true })
+  await correctFaxPaper(input, 1810, 3000, 0, [], { phasePixels: 10, clockPpm: 500 })
+  assert.equal(ticked, true)
 })

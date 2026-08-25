@@ -82,6 +82,14 @@ provided fallback), evaluates IOC/LPM and FM/AM acquisition in parallel, and
 continues printing after confirmed APT stop. `markSignalLost()` inserts a
 discontinuity boundary instead of completing a page in this mode.
 
+Radiofax clock recovery is enabled by default. Continuous-paper rows use the
+stable `nominalPaper` basis; `clockCalibration` events report phase, ppm,
+confidence and source control points. `correctFaxPaper()` applies those points
+on the native Rayon pool and returns a Promise, so correcting a long capture
+does not block the Node event loop. `decoder.clockState` is a synchronous
+snapshot suitable for status displays. Set `clockRecovery: 'off'` only when an
+upstream receiver supplies authoritative timing.
+
 ```js
 const { FaxEncoder, FaxIoc } = require('rasterwave-node')
 

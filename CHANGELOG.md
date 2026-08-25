@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Expose robust radiofax clock calibration, raster basis and synchronous clock snapshots.
+- Add native asynchronous correction for nominal continuous-paper rasters.
+
 ## 0.2.0
 
 - Add `continuousPaper` decoder backends for SSTV and radiofax while retaining

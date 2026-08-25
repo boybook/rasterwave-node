@@ -8,9 +8,10 @@ use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Error, JsDeferred, Result, Status};
 use napi_derive::napi;
 use rasterwave::fax::{
-    FaxDecodeEvent, FaxDecodeEventRef, FaxDecoder as CoreDecoder, FaxDecoderConfig,
-    FaxEncodeOptions, FaxEncoder as CoreEncoder, FaxIoc, FaxLpm, FaxModulation, FaxPolarity,
-    FaxSpec,
+    FaxClockCalibrationPoint, FaxClockRecoveryMode, FaxClockSource, FaxClockStatus, FaxDecodeEvent,
+    FaxDecodeEventRef, FaxDecoder as CoreDecoder, FaxDecoderConfig, FaxEncodeOptions,
+    FaxEncoder as CoreEncoder, FaxIoc, FaxLpm, FaxModulation, FaxPaperCorrection, FaxPolarity,
+    FaxRasterBasis, FaxSpec, correct_fax_paper as core_correct_fax_paper,
 };
 use rasterwave::{
     FaxPaperConfig, FaxPaperDecoder, FaxPaperEvent, FaxPaperEventRef, FaxPaperMode, GrayImage,
@@ -21,14 +22,16 @@ use crate::runtime::{
     MAX_INPUT_OPERATIONS, MAX_OPERATIONS, MAX_READ_SAMPLES, error, lock_error, pool, safe_number,
 };
 use crate::types::{
-    FaxDecoderOptions, FaxEncoderOptions, FaxModulationOptions, FaxSpecOptions, JsFaxIoc,
-    JsFaxPolarity,
+    FaxClockCalibrationOptions, FaxDecoderOptions, FaxEncoderOptions, FaxModulationOptions,
+    FaxPaperCorrectionOptions, FaxSpecOptions, JsFaxIoc, JsFaxPolarity,
 };
 
 type VoidResolver = Box<dyn FnOnce(Env) -> Result<()> + Send>;
 type VoidDeferred = JsDeferred<(), VoidResolver>;
 type SamplesResolver = Box<dyn FnOnce(Env) -> Result<Float32Array> + Send>;
 type SamplesDeferred = JsDeferred<Float32Array, SamplesResolver>;
+type BytesResolver = Box<dyn FnOnce(Env) -> Result<Uint8Array> + Send>;
+type BytesDeferred = JsDeferred<Uint8Array, BytesResolver>;
 
 #[napi(object)]
 pub struct FaxDecodeNotification {
@@ -51,6 +54,25 @@ pub struct FaxDecodeNotification {
     pub trusted: Option<bool>,
     pub start_line: Option<f64>,
     pub end_line: Option<f64>,
+    pub basis: Option<String>,
+    pub revision: Option<u32>,
+    pub reference_line: Option<f64>,
+    pub phase_pixels: Option<f64>,
+    pub clock_ppm: Option<f64>,
+    pub confidence: Option<f64>,
+    pub clock_source: Option<String>,
+    pub clock_status: Option<String>,
+}
+
+#[napi(object)]
+pub struct FaxClockStateSnapshot {
+    pub revision: u32,
+    pub reference_line: f64,
+    pub phase_pixels: f64,
+    pub clock_ppm: f64,
+    pub confidence: f64,
+    pub source: String,
+    pub status: String,
 }
 
 enum CodecEvent {
@@ -87,6 +109,14 @@ impl OwnedNotification {
             trusted: None,
             start_line: None,
             end_line: None,
+            basis: None,
+            revision: None,
+            reference_line: None,
+            phase_pixels: None,
+            clock_ppm: None,
+            confidence: None,
+            clock_source: None,
+            clock_status: None,
         };
         match self {
             Self::Drain => output.r#type = "drain".to_owned(),
@@ -100,13 +130,23 @@ impl OwnedNotification {
                     output.r#type = "aptDetected".to_owned();
                     output.ioc = Some(ioc.into());
                 }
-                FaxDecodeEvent::PhasingLocked { ioc, lpm, width } => {
+                FaxDecodeEvent::PhasingLocked {
+                    ioc,
+                    lpm,
+                    width,
+                    clock,
+                } => {
                     output.r#type = "phasingLocked".to_owned();
                     output.ioc = Some(ioc.into());
                     output.lpm = Some(u32::from(lpm.get()));
                     output.width = Some(width);
+                    apply_clock(&mut output, clock)?;
                 }
-                FaxDecodeEvent::PageStarted { page_id, spec } => {
+                FaxDecodeEvent::PageStarted {
+                    page_id,
+                    spec,
+                    clock,
+                } => {
                     output.r#type = "pageStarted".to_owned();
                     output.page_id = Some(safe_number(page_id, "pageId")?);
                     output.ioc = Some(spec.ioc.into());
@@ -114,16 +154,19 @@ impl OwnedNotification {
                     output.width = Some(spec.width());
                     output.active_width = Some(spec.active_width());
                     output.modulation = Some(modulation_name(spec.modulation).to_owned());
+                    apply_clock(&mut output, clock)?;
                 }
                 FaxDecodeEvent::LineReady {
                     page_id,
                     line_index,
                     pixels,
+                    basis,
                 } => {
                     output.r#type = "lineReady".to_owned();
                     output.page_id = Some(safe_number(page_id, "pageId")?);
                     output.line_index = Some(f64::from(line_index));
                     output.pixels = Some(Uint8Array::new(pixels));
+                    output.basis = Some(raster_basis_name(basis).to_owned());
                 }
                 FaxDecodeEvent::PageCompleted {
                     page_id,
@@ -170,6 +213,16 @@ impl OwnedNotification {
                     output.r#type = "aptDetected".to_owned();
                     output.ioc = Some(ioc.into());
                 }
+                FaxPaperEvent::ClockCalibration {
+                    paper_id,
+                    boundary_id,
+                    calibration,
+                } => {
+                    output.r#type = "clockCalibration".to_owned();
+                    output.paper_id = Some(safe_number(paper_id, "paperId")?);
+                    output.boundary_id = Some(safe_number(boundary_id, "boundaryId")?);
+                    apply_clock(&mut output, calibration)?;
+                }
                 FaxPaperEvent::LineReady {
                     paper_id,
                     boundary_id,
@@ -177,6 +230,7 @@ impl OwnedNotification {
                     segment_line_index,
                     spec,
                     pixels,
+                    basis,
                 } => {
                     output.r#type = "rasterLineReady".to_owned();
                     output.paper_id = Some(safe_number(paper_id, "paperId")?);
@@ -185,6 +239,7 @@ impl OwnedNotification {
                     output.segment_line_index = Some(segment_line_index);
                     apply_spec(&mut output, spec);
                     output.pixels = Some(Uint8Array::new(pixels));
+                    output.basis = Some(raster_basis_name(basis).to_owned());
                 }
                 FaxPaperEvent::TransmissionCompleted {
                     paper_id,
@@ -230,6 +285,43 @@ fn apply_spec(output: &mut FaxDecodeNotification, spec: FaxSpec) {
     output.modulation = Some(modulation_name(spec.modulation).to_owned());
 }
 
+fn apply_clock(output: &mut FaxDecodeNotification, clock: FaxClockCalibrationPoint) -> Result<()> {
+    output.revision = Some(clock.revision);
+    output.reference_line = Some(safe_number(clock.reference_line, "referenceLine")?);
+    output.phase_pixels = Some(f64::from(clock.phase_pixels));
+    output.clock_ppm = Some(f64::from(clock.clock_ppm));
+    output.confidence = Some(f64::from(clock.confidence));
+    output.clock_source = Some(clock_source_name(clock.source).to_owned());
+    output.clock_status = Some(clock_status_name(clock.status).to_owned());
+    Ok(())
+}
+
+fn clock_source_name(source: FaxClockSource) -> &'static str {
+    match source {
+        FaxClockSource::Nominal => "nominal",
+        FaxClockSource::Phasing => "phasing",
+        FaxClockSource::DeadSector => "deadSector",
+        FaxClockSource::Manual => "manual",
+    }
+}
+
+fn clock_status_name(status: FaxClockStatus) -> &'static str {
+    match status {
+        FaxClockStatus::Nominal => "nominal",
+        FaxClockStatus::Acquiring => "acquiring",
+        FaxClockStatus::Locked => "locked",
+        FaxClockStatus::Tracking => "tracking",
+        FaxClockStatus::Degraded => "degraded",
+    }
+}
+
+fn raster_basis_name(basis: FaxRasterBasis) -> &'static str {
+    match basis {
+        FaxRasterBasis::Calibrated => "calibrated",
+        FaxRasterBasis::NominalPaper => "nominalPaper",
+    }
+}
+
 fn paper_boundary_name(kind: PaperBoundaryKind) -> &'static str {
     match kind {
         PaperBoundaryKind::Initial => "initial",
@@ -240,6 +332,115 @@ fn paper_boundary_name(kind: PaperBoundaryKind) -> &'static str {
         PaperBoundaryKind::Discontinuity => "discontinuity",
         PaperBoundaryKind::Reset => "reset",
         _ => "unknown",
+    }
+}
+
+/// Correct an owned nominal-grid fax paper without blocking the Node event loop.
+#[napi]
+pub fn correct_fax_paper<'env>(
+    env: &'env Env,
+    pixels: Uint8Array,
+    width: u32,
+    height: u32,
+    start_line: f64,
+    calibration: Vec<FaxClockCalibrationOptions>,
+    adjustment: Option<FaxPaperCorrectionOptions>,
+) -> Result<Object<'env>> {
+    let start_line = safe_u64_input(start_line, "startLine")?;
+    let points = calibration
+        .into_iter()
+        .map(|point| {
+            Ok(FaxClockCalibrationPoint {
+                revision: safe_u32_input(point.revision, "revision")?,
+                reference_line: safe_u64_input(point.reference_line, "referenceLine")?,
+                phase_pixels: finite_f32(point.phase_pixels, "phasePixels")?,
+                clock_ppm: finite_f32(point.clock_ppm, "clockPpm")?,
+                confidence: finite_f32(point.confidence, "confidence")?.clamp(0.0, 1.0),
+                source: parse_clock_source(&point.source)?,
+                status: parse_clock_status(&point.status)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let adjustment = adjustment.unwrap_or_default();
+    let adjustment = FaxPaperCorrection {
+        phase_pixels: finite_f32(adjustment.phase_pixels.unwrap_or(0.0), "phasePixels")?,
+        clock_ppm: finite_f32(adjustment.clock_ppm.unwrap_or(0.0), "clockPpm")?,
+    };
+    let owned = pixels.to_vec();
+    let (deferred, promise): (BytesDeferred, _) =
+        env.create_deferred::<Uint8Array, BytesResolver>()?;
+    pool().spawn(move || {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            core_correct_fax_paper(&owned, width, height, start_line, &points, adjustment)
+        }));
+        match result {
+            Ok(Ok(output)) => deferred.resolve(Box::new(move |_| Ok(Uint8Array::new(output)))),
+            Ok(Err(err)) => deferred.reject(error("RASTERWAVE_CORRECTION_FAILED", err)),
+            Err(_) => deferred.reject(error(
+                "RASTERWAVE_NATIVE_PANIC",
+                "fax paper correction panicked",
+            )),
+        }
+    });
+    Ok(promise)
+}
+
+fn safe_u64_input(value: f64, field: &str) -> Result<u64> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 9_007_199_254_740_991.0
+    {
+        return Err(error(
+            "RASTERWAVE_INVALID_CONFIG",
+            format!("{field} must be a non-negative safe integer"),
+        ));
+    }
+    Ok(value as u64)
+}
+
+fn safe_u32_input(value: f64, field: &str) -> Result<u32> {
+    let value = safe_u64_input(value, field)?;
+    u32::try_from(value).map_err(|_| {
+        error(
+            "RASTERWAVE_INVALID_CONFIG",
+            format!("{field} exceeds the supported range"),
+        )
+    })
+}
+
+fn finite_f32(value: f64, field: &str) -> Result<f32> {
+    let converted = value as f32;
+    if !value.is_finite() || !converted.is_finite() {
+        return Err(error(
+            "RASTERWAVE_INVALID_CONFIG",
+            format!("{field} must be finite"),
+        ));
+    }
+    Ok(converted)
+}
+
+fn parse_clock_source(value: &str) -> Result<FaxClockSource> {
+    match value {
+        "nominal" => Ok(FaxClockSource::Nominal),
+        "phasing" => Ok(FaxClockSource::Phasing),
+        "deadSector" => Ok(FaxClockSource::DeadSector),
+        "manual" => Ok(FaxClockSource::Manual),
+        _ => Err(error(
+            "RASTERWAVE_INVALID_CONFIG",
+            "clock source is invalid",
+        )),
+    }
+}
+
+fn parse_clock_status(value: &str) -> Result<FaxClockStatus> {
+    match value {
+        "nominal" => Ok(FaxClockStatus::Nominal),
+        "acquiring" => Ok(FaxClockStatus::Acquiring),
+        "locked" => Ok(FaxClockStatus::Locked),
+        "tracking" => Ok(FaxClockStatus::Tracking),
+        "degraded" => Ok(FaxClockStatus::Degraded),
+        _ => Err(error(
+            "RASTERWAVE_INVALID_CONFIG",
+            "clock status is invalid",
+        )),
     }
 }
 
@@ -269,6 +470,7 @@ struct DecoderShared {
     accepting: AtomicBool,
     disposed: AtomicBool,
     failed: Arc<AtomicBool>,
+    clock_state: Mutex<FaxClockCalibrationPoint>,
 }
 
 enum DecoderBackend {
@@ -291,6 +493,7 @@ impl FaxDecoder {
     ) -> Result<Self> {
         let options = options.unwrap_or(FaxDecoderOptions {
             output_mode: None,
+            clock_recovery: None,
             continuous_auto: None,
             auto_am_modulation: None,
             immediate_decode: None,
@@ -328,6 +531,16 @@ impl FaxDecoder {
             ));
         }
         let parsed_ioc = options.ioc.map(Into::into);
+        let clock_recovery = match options.clock_recovery.as_deref().unwrap_or("auto") {
+            "auto" => FaxClockRecoveryMode::Auto,
+            "off" => FaxClockRecoveryMode::Off,
+            _ => {
+                return Err(error(
+                    "RASTERWAVE_INVALID_CONFIG",
+                    "clockRecovery must be 'auto' or 'off'",
+                ));
+            }
+        };
         let parsed_lpm = options.lpm.map(fax_lpm).transpose()?;
         let parsed_modulation = options
             .modulation
@@ -356,6 +569,7 @@ impl FaxDecoder {
             };
             let mut paper = FaxPaperConfig {
                 mode,
+                clock_recovery,
                 ..FaxPaperConfig::default()
             };
             if let Some(value) = options.auto_am_modulation.as_ref() {
@@ -393,6 +607,7 @@ impl FaxDecoder {
         } else {
             let mut config = FaxDecoderConfig {
                 immediate_decode: options.immediate_decode.unwrap_or(false),
+                clock_recovery,
                 ioc: parsed_ioc,
                 lpm: parsed_lpm,
                 modulation: parsed_modulation.unwrap_or(FaxModulation::WMO_FM),
@@ -447,6 +662,7 @@ impl FaxDecoder {
                 accepting: AtomicBool::new(true),
                 disposed: AtomicBool::new(false),
                 failed: Arc::new(AtomicBool::new(false)),
+                clock_state: Mutex::new(FaxClockCalibrationPoint::default()),
             }),
         })
     }
@@ -526,6 +742,20 @@ impl FaxDecoder {
     pub fn queued_samples(&self) -> Result<f64> {
         let queue = self.shared.queue.lock().map_err(|_| lock_error())?;
         safe_number(queue.queued_samples as u64, "queuedSamples")
+    }
+
+    #[napi(getter)]
+    pub fn clock_state(&self) -> Result<FaxClockStateSnapshot> {
+        let clock = *self.shared.clock_state.lock().map_err(|_| lock_error())?;
+        Ok(FaxClockStateSnapshot {
+            revision: clock.revision,
+            reference_line: safe_number(clock.reference_line, "referenceLine")?,
+            phase_pixels: f64::from(clock.phase_pixels),
+            clock_ppm: f64::from(clock.clock_ppm),
+            confidence: f64::from(clock.confidence),
+            source: clock_source_name(clock.source).to_owned(),
+            status: clock_status_name(clock.status).to_owned(),
+        })
     }
 }
 
@@ -785,6 +1015,11 @@ fn process_decoder_command(shared: &Arc<DecoderShared>, command: DecoderCommand)
 }
 
 fn emit_notification(shared: &DecoderShared, event: OwnedNotification) {
+    if let Some(clock) = notification_clock(&event)
+        && let Ok(mut state) = shared.clock_state.lock()
+    {
+        *state = clock;
+    }
     let failed = shared.failed.clone();
     let status = shared.callback.call_with_return_value(
         event,
@@ -798,6 +1033,23 @@ fn emit_notification(shared: &DecoderShared, event: OwnedNotification) {
     );
     if status != Status::Ok && status != Status::Closing {
         shared.failed.store(true, Ordering::Release);
+    }
+}
+
+fn notification_clock(event: &OwnedNotification) -> Option<FaxClockCalibrationPoint> {
+    match event {
+        OwnedNotification::Codec(CodecEvent::Framed(FaxDecodeEvent::PhasingLocked {
+            clock,
+            ..
+        }))
+        | OwnedNotification::Codec(CodecEvent::Framed(FaxDecodeEvent::PageStarted {
+            clock, ..
+        })) => Some(*clock),
+        OwnedNotification::Codec(CodecEvent::Paper(FaxPaperEvent::ClockCalibration {
+            calibration,
+            ..
+        })) => Some(*calibration),
+        _ => None,
     }
 }
 

@@ -248,6 +248,7 @@ pub struct FaxEncoderOptions {
 #[derive(Clone)]
 pub struct FaxDecoderOptions {
     pub output_mode: Option<String>,
+    pub clock_recovery: Option<String>,
     pub continuous_auto: Option<bool>,
     pub auto_am_modulation: Option<FaxModulationOptions>,
     pub immediate_decode: Option<bool>,
@@ -264,4 +265,23 @@ pub struct FaxDecoderOptions {
     pub minimum_signal_level: Option<f64>,
     pub minimum_carrier_coherence: Option<f64>,
     pub queue_capacity_samples: Option<u32>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct FaxClockCalibrationOptions {
+    pub revision: f64,
+    pub reference_line: f64,
+    pub phase_pixels: f64,
+    pub clock_ppm: f64,
+    pub confidence: f64,
+    pub source: String,
+    pub status: String,
+}
+
+#[napi(object)]
+#[derive(Clone, Default)]
+pub struct FaxPaperCorrectionOptions {
+    pub phase_pixels: Option<f64>,
+    pub clock_ppm: Option<f64>,
 }

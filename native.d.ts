@@ -9,6 +9,7 @@ export declare class FaxDecoder {
   finish(): object
   dispose(): object
   get queuedSamples(): number
+  get clockState(): FaxClockStateSnapshot
 }
 
 export declare class FaxEncoder {
@@ -39,11 +40,34 @@ export declare class SstvEncoder {
   get progress(): EncoderProgressSnapshot
 }
 
+/** Correct an owned nominal-grid fax paper without blocking the Node event loop. */
+export declare function correctFaxPaper(pixels: Uint8Array, width: number, height: number, startLine: number, calibration: Array<FaxClockCalibrationOptions>, adjustment?: FaxPaperCorrectionOptions | undefined | null): object
+
 export interface EncoderProgressSnapshot {
   samplesEmitted: number
   estimatedTotalSamples: number
   currentRow?: number
   finished: boolean
+}
+
+export interface FaxClockCalibrationOptions {
+  revision: number
+  referenceLine: number
+  phasePixels: number
+  clockPpm: number
+  confidence: number
+  source: string
+  status: string
+}
+
+export interface FaxClockStateSnapshot {
+  revision: number
+  referenceLine: number
+  phasePixels: number
+  clockPpm: number
+  confidence: number
+  source: string
+  status: string
 }
 
 export interface FaxDecodeNotification {
@@ -66,10 +90,19 @@ export interface FaxDecodeNotification {
   trusted?: boolean
   startLine?: number
   endLine?: number
+  basis?: string
+  revision?: number
+  referenceLine?: number
+  phasePixels?: number
+  clockPpm?: number
+  confidence?: number
+  clockSource?: string
+  clockStatus?: string
 }
 
 export interface FaxDecoderOptions {
   outputMode?: string
+  clockRecovery?: string
   continuousAuto?: boolean
   autoAmModulation?: FaxModulationOptions
   immediateDecode?: boolean
@@ -112,6 +145,11 @@ export interface FaxModulationOptions {
   carrierHz?: number
   blackLevel?: number
   whiteLevel?: number
+}
+
+export interface FaxPaperCorrectionOptions {
+  phasePixels?: number
+  clockPpm?: number
 }
 
 export declare const enum FaxPolarity {

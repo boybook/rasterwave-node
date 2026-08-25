@@ -19,6 +19,7 @@ module.exports.SstvDecoder = native.SstvDecoder
 module.exports.SstvEncoder = native.SstvEncoder
 module.exports.FaxDecoder = native.FaxDecoder
 module.exports.FaxEncoder = native.FaxEncoder
+module.exports.correctFaxPaper = native.correctFaxPaper
 module.exports.SstvMode = SstvMode
 module.exports.FaxIoc = FaxIoc
 module.exports.FaxPolarity = FaxPolarity

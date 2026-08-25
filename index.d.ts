@@ -79,6 +79,7 @@ export interface FaxSpecOptions {
 export interface FaxEncoderOptions { amplitude?: number; includeApt?: boolean; includePhasing?: boolean }
 export interface FaxDecoderOptions {
   outputMode?: DecoderOutputMode
+  clockRecovery?: 'auto' | 'off'
   continuousAuto?: boolean
   autoAmModulation?: FaxModulationOptions
   immediateDecode?: boolean
@@ -87,16 +88,25 @@ export interface FaxDecoderOptions {
   acquisitionTimeoutSeconds?: number; stopConfirmSeconds?: number; signalLossSeconds?: number
   minimumSignalLevel?: number; minimumCarrierCoherence?: number; queueCapacitySamples?: number
 }
+export type FaxClockSource = 'nominal' | 'phasing' | 'deadSector' | 'manual'
+export type FaxClockStatus = 'nominal' | 'acquiring' | 'locked' | 'tracking' | 'degraded'
+export type FaxRasterBasis = 'calibrated' | 'nominalPaper'
+export interface FaxClockCalibration {
+  revision: number; referenceLine: number; phasePixels: number; clockPpm: number
+  confidence: number; source: FaxClockSource; status: FaxClockStatus
+}
+export interface FaxPaperCorrection { phasePixels?: number; clockPpm?: number }
 export type FaxDecodeEvent =
   | { type: 'paperStarted'; paperId: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am' }
   | { type: 'rasterBoundary'; paperId: number; boundaryId: number; lineIndex: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; boundaryKind: PaperBoundaryKind; trusted: boolean }
-  | { type: 'rasterLineReady'; paperId: number; boundaryId: number; lineIndex: number; segmentLineIndex: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; pixels: Uint8Array }
+  | ({ type: 'clockCalibration'; paperId: number; boundaryId: number } & FaxClockCalibration)
+  | { type: 'rasterLineReady'; paperId: number; boundaryId: number; lineIndex: number; segmentLineIndex: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; basis: FaxRasterBasis; pixels: Uint8Array }
   | { type: 'transmissionCompleted'; paperId: number; boundaryId: number; startLine: number; endLine: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; lines: number; partial: false }
   | { type: 'protocolObserved'; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am'; trusted: boolean }
   | { type: 'aptDetected'; ioc: FaxIoc }
-  | { type: 'phasingLocked'; ioc: FaxIoc; lpm: number; width: number }
-  | { type: 'pageStarted'; pageId: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am' }
-  | { type: 'lineReady'; pageId: number; lineIndex: number; pixels: Uint8Array }
+  | ({ type: 'phasingLocked'; ioc: FaxIoc; lpm: number; width: number } & FaxClockCalibration)
+  | ({ type: 'pageStarted'; pageId: number; ioc: FaxIoc; lpm: number; width: number; activeWidth: number; modulation: 'fm' | 'am' } & FaxClockCalibration)
+  | { type: 'lineReady'; pageId: number; lineIndex: number; basis: FaxRasterBasis; pixels: Uint8Array }
   | { type: 'pageCompleted'; pageId: number; lines: number; partial: boolean }
   | { type: 'signalRejected'; reason: string }
   | DecoderControlEvent | DecoderErrorEvent
@@ -110,7 +120,9 @@ export class FaxDecoder {
   finish(): Promise<void>
   dispose(): Promise<void>
   readonly queuedSamples: number
+  readonly clockState: FaxClockCalibration
 }
+export function correctFaxPaper(pixels: Uint8Array, width: number, height: number, startLine: number, calibration: FaxClockCalibration[], adjustment?: FaxPaperCorrection | null): Promise<Uint8Array>
 export class FaxEncoder {
   constructor(pixels: Uint8Array, width: number, height: number, spec: FaxSpecOptions, sampleRate: number, options?: FaxEncoderOptions | null)
   readSamples(maxSamples: number): Promise<Float32Array>

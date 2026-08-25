@@ -1,6 +1,7 @@
 import {
   FaxDecoder,
   FaxIoc,
+  correctFaxPaper,
   SstvDecoder,
   SstvEncoder,
   SstvMode,
@@ -28,3 +29,9 @@ new FaxDecoder(12000, {
   ioc: FaxIoc.Ioc288,
   lpm: 120,
 }, event => faxEvents.push(event))
+
+const corrected: Promise<Uint8Array> = correctFaxPaper(
+  new Uint8Array(8), 4, 2, 0,
+  [{ revision: 1, referenceLine: 0, phasePixels: 0, clockPpm: 0, confidence: 1, source: 'phasing', status: 'locked' }],
+)
+void corrected
