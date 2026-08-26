@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use napi::bindgen_prelude::*;
@@ -9,9 +9,9 @@ use napi::{Error, JsDeferred, Result, Status};
 use napi_derive::napi;
 use rasterwave::{
     AbortReason, DecodeEvent, DecodeEventRef, DecoderConfig, DetectionSource, EncodeOptions,
-    LineCompleteness, PaperBoundaryKind, RgbImage, SstvDecoder as CoreDecoder,
+    EncoderStage, LineCompleteness, PaperBoundaryKind, RgbImage, SstvDecoder as CoreDecoder,
     SstvEncoder as CoreEncoder, SstvPaperConfig, SstvPaperDecoder, SstvPaperEvent,
-    SstvPaperEventRef, SstvPaperMode, SyncState,
+    SstvPaperEventRef, SstvPaperMode, SstvStationId, SstvTransmissionEnvelope, SyncState,
 };
 
 use crate::runtime::{
@@ -945,6 +945,9 @@ pub struct EncoderProgressSnapshot {
     pub samples_emitted: f64,
     pub estimated_total_samples: f64,
     pub current_row: Option<u32>,
+    pub stage: String,
+    pub raster_start_sample: f64,
+    pub raster_end_sample: f64,
     pub finished: bool,
 }
 
@@ -964,7 +967,10 @@ struct EncoderShared {
     accepting: AtomicBool,
     samples_emitted: AtomicU64,
     estimated_total_samples: u64,
+    raster_start_sample: u64,
+    raster_end_sample: u64,
     current_row: AtomicI64,
+    stage: AtomicU8,
     finished: AtomicBool,
 }
 
@@ -990,6 +996,10 @@ impl SstvEncoder {
             amplitude: None,
             tone_offset_hz: None,
             include_vis_header: None,
+            enhanced_preamble: None,
+            station_id: None,
+            post_image_gap_ms: None,
+            end_guard_ms: None,
         });
         let mut encode_options = EncodeOptions::default();
         if let Some(value) = options.amplitude {
@@ -1001,8 +1011,48 @@ impl SstvEncoder {
         if let Some(value) = options.include_vis_header {
             encode_options.include_vis_header = value;
         }
-        let codec = CoreEncoder::new(image, core_mode, sample_rate, encode_options)
-            .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?;
+        let station_id = match options.station_id {
+            None => SstvStationId::None,
+            Some(value) if value.kind == "none" => SstvStationId::None,
+            Some(value) if value.kind == "fsk" => SstvStationId::Fsk {
+                callsign: value.callsign.ok_or_else(|| {
+                    error(
+                        "RASTERWAVE_INVALID_CONFIG",
+                        "FSK stationId requires callsign",
+                    )
+                })?,
+            },
+            Some(value) if value.kind == "cw" => SstvStationId::Cw {
+                callsign: value.callsign.ok_or_else(|| {
+                    error(
+                        "RASTERWAVE_INVALID_CONFIG",
+                        "CW stationId requires callsign",
+                    )
+                })?,
+                wpm: u16::try_from(value.wpm.unwrap_or(20)).map_err(|_| {
+                    error(
+                        "RASTERWAVE_INVALID_CONFIG",
+                        "CW stationId WPM is out of range",
+                    )
+                })?,
+                tone_hz: value.tone_hz.unwrap_or(800.0) as f32,
+            },
+            Some(_) => {
+                return Err(error(
+                    "RASTERWAVE_INVALID_CONFIG",
+                    "stationId.kind must be none, fsk, or cw",
+                ));
+            }
+        };
+        let envelope = SstvTransmissionEnvelope {
+            enhanced_preamble: options.enhanced_preamble.unwrap_or(false),
+            station_id,
+            post_image_gap_seconds: options.post_image_gap_ms.unwrap_or(0.0) / 1000.0,
+            end_guard_seconds: options.end_guard_ms.unwrap_or(0.0) / 1000.0,
+        };
+        let codec =
+            CoreEncoder::new_with_envelope(image, core_mode, sample_rate, encode_options, envelope)
+                .map_err(|err| error("RASTERWAVE_INVALID_CONFIG", err))?;
         let progress = codec.progress();
         Ok(Self {
             shared: Arc::new(EncoderShared {
@@ -1014,7 +1064,10 @@ impl SstvEncoder {
                 accepting: AtomicBool::new(true),
                 samples_emitted: AtomicU64::new(progress.samples_emitted),
                 estimated_total_samples: progress.estimated_total_samples,
+                raster_start_sample: progress.raster_start_sample,
+                raster_end_sample: progress.raster_end_sample,
                 current_row: AtomicI64::new(progress.current_row.map(i64::from).unwrap_or(-1)),
+                stage: AtomicU8::new(encoder_stage_code(progress.stage)),
                 finished: AtomicBool::new(progress.finished),
             }),
         })
@@ -1105,8 +1158,34 @@ impl SstvEncoder {
                 -1 => None,
                 value => Some(value as u32),
             },
+            stage: encoder_stage_name_from_code(self.shared.stage.load(Ordering::Acquire))
+                .to_owned(),
+            raster_start_sample: safe_number(self.shared.raster_start_sample, "rasterStartSample")?,
+            raster_end_sample: safe_number(self.shared.raster_end_sample, "rasterEndSample")?,
             finished: self.shared.finished.load(Ordering::Acquire),
         })
+    }
+}
+
+fn encoder_stage_code(stage: EncoderStage) -> u8 {
+    match stage {
+        EncoderStage::Preamble => 0,
+        EncoderStage::Vis => 1,
+        EncoderStage::Raster => 2,
+        EncoderStage::StationId => 3,
+        EncoderStage::Guard => 4,
+        EncoderStage::Finished => 5,
+    }
+}
+
+fn encoder_stage_name_from_code(code: u8) -> &'static str {
+    match code {
+        0 => "preamble",
+        1 => "vis",
+        2 => "raster",
+        3 => "stationId",
+        4 => "guard",
+        _ => "finished",
     }
 }
 
@@ -1144,6 +1223,9 @@ fn schedule_encoder(shared: Arc<EncoderShared>) {
                             progress.current_row.map(i64::from).unwrap_or(-1),
                             Ordering::Release,
                         );
+                        shared
+                            .stage
+                            .store(encoder_stage_code(progress.stage), Ordering::Release);
                         shared.finished.store(progress.finished, Ordering::Release);
                         Ok::<_, Error>(output)
                     }));

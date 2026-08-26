@@ -18,9 +18,16 @@ const accepted: boolean = decoder.pushF32(new Float32Array(10))
 void accepted
 void decoder.drain()
 
-const encoder = new SstvEncoder(new Uint8Array(160 * 120 * 3), SstvMode.Robot8Bw, 12000)
+const encoder = new SstvEncoder(new Uint8Array(160 * 120 * 3), SstvMode.Robot8Bw, 12000, {
+  enhancedPreamble: true,
+  stationId: { kind: 'cw', callsign: 'BG5DRB', wpm: 20, toneHz: 800 },
+  postImageGapMs: 500,
+  endGuardMs: 300,
+})
 const samples: Promise<Float32Array> = encoder.readSamples(4096)
 void samples
+const rasterEnd: number = encoder.progress.rasterEndSample
+void rasterEnd
 
 const faxEvents: FaxDecodeEvent[] = []
 new FaxDecoder(12000, {

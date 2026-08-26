@@ -191,10 +191,23 @@ pub struct SstvDecoderOptions {
 
 #[napi(object)]
 #[derive(Clone)]
+pub struct SstvStationIdOptions {
+    pub kind: String,
+    pub callsign: Option<String>,
+    pub wpm: Option<u32>,
+    pub tone_hz: Option<f64>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
 pub struct SstvEncoderOptions {
     pub amplitude: Option<f64>,
     pub tone_offset_hz: Option<f64>,
     pub include_vis_header: Option<bool>,
+    pub enhanced_preamble: Option<bool>,
+    pub station_id: Option<SstvStationIdOptions>,
+    pub post_image_gap_ms: Option<f64>,
+    pub end_guard_ms: Option<f64>,
 }
 
 #[napi(js_name = "FaxIoc", string_enum = "camelCase")]

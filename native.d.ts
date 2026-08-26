@@ -47,6 +47,9 @@ export interface EncoderProgressSnapshot {
   samplesEmitted: number
   estimatedTotalSamples: number
   currentRow?: number
+  stage: string
+  rasterStartSample: number
+  rasterEndSample: number
   finished: boolean
 }
 
@@ -213,6 +216,10 @@ export interface SstvEncoderOptions {
   amplitude?: number
   toneOffsetHz?: number
   includeVisHeader?: boolean
+  enhancedPreamble?: boolean
+  stationId?: SstvStationIdOptions
+  postImageGapMs?: number
+  endGuardMs?: number
 }
 
 export declare const enum SstvMode {
@@ -263,3 +270,10 @@ export interface SstvModeInfo {
 }
 
 export declare function sstvModes(): Array<SstvModeInfo>
+
+export interface SstvStationIdOptions {
+  kind: string
+  callsign?: string
+  wpm?: number
+  toneHz?: number
+}

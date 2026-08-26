@@ -37,6 +37,35 @@ test('encoder reads are native promises and preserve FIFO progress', async () =>
   assert.throws(() => encoder.readSamples(1), /RASTERWAVE_DISPOSED/)
 })
 
+test('SSTV transmission envelope exposes raster boundaries and native stages', async () => {
+  const info = rasterwave.sstvModes().find(mode => mode.mode === 'robot8Bw')
+  const pixels = new Uint8Array(info.width * info.height * 3)
+  const encoder = new rasterwave.SstvEncoder(pixels, info.mode, 12000, {
+    enhancedPreamble: true,
+    stationId: { kind: 'fsk', callsign: 'BG5DRB' },
+    postImageGapMs: 500,
+    endGuardMs: 300,
+  })
+  assert.deepEqual(encoder.progress, {
+    samplesEmitted: 0,
+    estimatedTotalSamples: 145680,
+    stage: 'preamble',
+    rasterStartSample: 20520,
+    rasterEndSample: 115560,
+    finished: false,
+  })
+  let tail = new Float32Array()
+  while (!encoder.isFinished) tail = await encoder.readSamples(4096)
+  assert.equal(encoder.progress.stage, 'finished')
+  assert.ok(tail.length > 0)
+  assert.ok(tail.slice(-Math.min(3600, tail.length)).every(sample => sample === 0))
+  await encoder.dispose()
+
+  assert.throws(() => new rasterwave.SstvEncoder(pixels, info.mode, 12000, {
+    stationId: { kind: 'cw', callsign: 'bg5drb' },
+  }), /RASTERWAVE_INVALID_CONFIG/)
+})
+
 test('large native reads do not block the Node event loop', async () => {
   const info = rasterwave.sstvModes().find(mode => mode.mode === 'pd290')
   const pixels = new Uint8Array(info.width * info.height * 3)

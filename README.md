@@ -66,6 +66,24 @@ await encoder.dispose()
 
 Concurrent `readSamples()` calls are accepted and resolved in call order.
 
+Radio applications can add a QSSTV-compatible calibration preamble and a
+post-image station identifier without concatenating JavaScript audio buffers:
+
+```js
+const encoder = new SstvEncoder(rgb, mode, 48000, {
+  enhancedPreamble: true,
+  stationId: { kind: 'fsk', callsign: 'N0CALL' },
+  postImageGapMs: 500,
+  endGuardMs: 300,
+})
+
+const { rasterStartSample, rasterEndSample } = encoder.progress
+```
+
+Use `{ kind: 'cw', callsign: 'N0CALL', wpm: 20, toneHz: 800 }` for an audible
+Morse ID or `{ kind: 'none' }` for no ID. The legacy constructor remains
+sample-identical and still includes the standard VIS header by default.
+
 ## Radiofax
 
 `FaxDecoder` uses the same synchronous write and event callback model.

@@ -28,7 +28,15 @@ export interface SstvDecoderOptions {
   detectVis?: boolean; detectSyncTiming?: boolean; manualMode?: SstvMode
   minimumSignalLevel?: number; queueCapacitySamples?: number
 }
-export interface SstvEncoderOptions { amplitude?: number; toneOffsetHz?: number; includeVisHeader?: boolean }
+export type SstvStationIdOptions =
+  | { kind: 'none' }
+  | { kind: 'fsk'; callsign: string }
+  | { kind: 'cw'; callsign: string; wpm?: number; toneHz?: number }
+export interface SstvEncoderOptions {
+  amplitude?: number; toneOffsetHz?: number; includeVisHeader?: boolean
+  enhancedPreamble?: boolean; stationId?: SstvStationIdOptions
+  postImageGapMs?: number; endGuardMs?: number
+}
 
 export type SstvDecodeEvent =
   | { type: 'paperStarted'; paperId: number; mode: SstvMode; width: number }
@@ -45,7 +53,11 @@ export type SstvDecodeEvent =
   | DecoderControlEvent | DecoderErrorEvent
 export type DecoderControlEvent = { type: 'drain' | 'finished' }
 export type DecoderErrorEvent = { type: 'error'; reason: string }
-export interface EncoderProgress { samplesEmitted: number; estimatedTotalSamples: number; currentRow?: number; finished: boolean }
+export type SstvEncoderStage = 'preamble' | 'vis' | 'raster' | 'stationId' | 'guard' | 'finished'
+export interface EncoderProgress {
+  samplesEmitted: number; estimatedTotalSamples: number; currentRow?: number
+  stage: SstvEncoderStage; rasterStartSample: number; rasterEndSample: number; finished: boolean
+}
 
 export class SstvDecoder {
   constructor(inputSampleRate: number, options: SstvDecoderOptions | null | undefined, onEvent: (event: SstvDecodeEvent) => void)

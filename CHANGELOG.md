@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Add opt-in enhanced SSTV calibration preamble, FSK-ID, CW station ID and
+  end-guard silence through the streaming encoder.
+- Expose encoder stage and exact raster sample boundaries for loopback preview.
+
 ## 0.3.1
 
 - Upgrade to the joint radiofax phase/ppm tracker from `rasterwave` 0.3.1.
