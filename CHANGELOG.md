@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Upgrade to the joint radiofax phase/ppm tracker from `rasterwave` 0.3.1.
+
 ## 0.3.0
 
 - Expose robust radiofax clock calibration, raster basis and synchronous clock snapshots.
