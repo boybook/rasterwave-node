@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Upgrade to `rasterwave` 0.5.0 with stable phasing-calibrated FAX rows.
+- Remove the misleading per-line dead-sector geometry option and expose the
+  conservative `imageContent` timing source for mid-image joins.
+- Keep nominal-paper correction sparse, gated, and non-destructive; calibrated
+  phasing captures are no longer retimed by later map content.
+
 ## 0.4.0
 
 - Add opt-in enhanced SSTV calibration preamble, FSK-ID, CW station ID and

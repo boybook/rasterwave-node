@@ -86,7 +86,7 @@ export interface FaxModulationOptions {
 export interface FaxSpecOptions {
   ioc: FaxIoc; lpm: number; modulation?: FaxModulationOptions
   phasingSeconds?: number; startSeconds?: number; stopSeconds?: number
-  trailingBlackSeconds?: number; deadSectorFraction?: number
+  trailingBlackSeconds?: number
 }
 export interface FaxEncoderOptions { amplitude?: number; includeApt?: boolean; includePhasing?: boolean }
 export interface FaxDecoderOptions {
@@ -100,7 +100,7 @@ export interface FaxDecoderOptions {
   acquisitionTimeoutSeconds?: number; stopConfirmSeconds?: number; signalLossSeconds?: number
   minimumSignalLevel?: number; minimumCarrierCoherence?: number; queueCapacitySamples?: number
 }
-export type FaxClockSource = 'nominal' | 'phasing' | 'deadSector' | 'manual'
+export type FaxClockSource = 'nominal' | 'phasing' | 'imageContent' | 'manual'
 export type FaxClockStatus = 'nominal' | 'acquiring' | 'locked' | 'tracking' | 'degraded'
 export type FaxRasterBasis = 'calibrated' | 'nominalPaper'
 export interface FaxClockCalibration {

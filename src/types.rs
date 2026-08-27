@@ -246,7 +246,6 @@ pub struct FaxSpecOptions {
     pub start_seconds: Option<f64>,
     pub stop_seconds: Option<f64>,
     pub trailing_black_seconds: Option<f64>,
-    pub dead_sector_fraction: Option<f64>,
 }
 
 #[napi(object)]

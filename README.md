@@ -101,19 +101,20 @@ continues printing after confirmed APT stop. `markSignalLost()` inserts a
 discontinuity boundary instead of completing a page in this mode.
 
 Radiofax clock recovery is enabled by default. Continuous-paper rows use the
-stable `nominalPaper` basis; `clockCalibration` events report phase, ppm,
-confidence and source control points. `correctFaxPaper()` applies those points
-on the native Rayon pool and returns a Promise, so correcting a long capture
-does not block the Node event loop. `decoder.clockState` is a synchronous
-snapshot suitable for status displays. Set `clockRecovery: 'off'` only when an
-upstream receiver supplies authoritative timing.
+stable `nominalPaper` basis until trusted phasing is acquired; phasing captures
+then emit `calibrated` rows directly and are never retimed by ordinary image
+content. A mid-image join may report sparse `imageContent` points only after
+stable evidence; this is a heuristic, not a protocol lock. `correctFaxPaper()`
+applies points on the native Rayon pool and returns a Promise, so correcting a
+long nominal capture does not block the Node event loop. Do not apply it again
+to `calibrated` rows.
 
 ```js
 const { FaxEncoder, FaxIoc } = require('rasterwave-node')
 
 const encoder = new FaxEncoder(
   grayscale,
-  864,
+  905,
   pageHeight,
   { ioc: FaxIoc.Ioc288, lpm: 120 },
   12000,

@@ -152,7 +152,7 @@ impl OwnedNotification {
                     output.ioc = Some(spec.ioc.into());
                     output.lpm = Some(u32::from(spec.lpm.get()));
                     output.width = Some(spec.width());
-                    output.active_width = Some(spec.active_width());
+                    output.active_width = Some(spec.width());
                     output.modulation = Some(modulation_name(spec.modulation).to_owned());
                     apply_clock(&mut output, clock)?;
                 }
@@ -281,7 +281,7 @@ fn apply_spec(output: &mut FaxDecodeNotification, spec: FaxSpec) {
     output.ioc = Some(spec.ioc.into());
     output.lpm = Some(u32::from(spec.lpm.get()));
     output.width = Some(spec.width());
-    output.active_width = Some(spec.active_width());
+    output.active_width = Some(spec.width());
     output.modulation = Some(modulation_name(spec.modulation).to_owned());
 }
 
@@ -300,7 +300,7 @@ fn clock_source_name(source: FaxClockSource) -> &'static str {
     match source {
         FaxClockSource::Nominal => "nominal",
         FaxClockSource::Phasing => "phasing",
-        FaxClockSource::DeadSector => "deadSector",
+        FaxClockSource::ImageContent => "imageContent",
         FaxClockSource::Manual => "manual",
     }
 }
@@ -421,7 +421,7 @@ fn parse_clock_source(value: &str) -> Result<FaxClockSource> {
     match value {
         "nominal" => Ok(FaxClockSource::Nominal),
         "phasing" => Ok(FaxClockSource::Phasing),
-        "deadSector" => Ok(FaxClockSource::DeadSector),
+        "imageContent" => Ok(FaxClockSource::ImageContent),
         "manual" => Ok(FaxClockSource::Manual),
         _ => Err(error(
             "RASTERWAVE_INVALID_CONFIG",
@@ -1322,9 +1322,6 @@ fn fax_spec(options: &FaxSpecOptions) -> Result<FaxSpec> {
     }
     if let Some(value) = options.trailing_black_seconds {
         spec.trailing_black_seconds = value as f32;
-    }
-    if let Some(value) = options.dead_sector_fraction {
-        spec.dead_sector_fraction = value as f32;
     }
     Ok(spec)
 }

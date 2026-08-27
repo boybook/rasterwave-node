@@ -19,7 +19,7 @@ for (const modulation of [
   { kind: 'am', carrierHz: 1800, blackLevel: 1, whiteLevel: 0.04 },
 ]) {
   test(`streams IOC288 ${modulation.kind.toUpperCase()} fax rows`, async () => {
-    const width = 864
+    const width = 905
     const height = 2
     const isAm = modulation.kind === 'am'
     const spec = {
@@ -27,7 +27,7 @@ for (const modulation of [
       lpm: isAm ? 240 : 120,
       modulation,
       ...(isAm ? {} : {
-        phasingSeconds: 1,
+        phasingSeconds: 3,
         startSeconds: 1,
         stopSeconds: 1,
         trailingBlackSeconds: 0.1,
@@ -41,7 +41,7 @@ for (const modulation of [
       modulation,
       maxLines: height,
       ...(isAm ? {} : {
-        expectedPhasingSeconds: 1,
+        expectedPhasingSeconds: 3,
         aptConfirmSeconds: 0.2,
         acquisitionTimeoutSeconds: 5,
         stopConfirmSeconds: 0.2,
@@ -60,12 +60,12 @@ for (const modulation of [
 }
 
 test('markSignalLost closes an active page as partial', async () => {
-  const width = 864
-  const spec = { ioc: FaxIoc.Ioc288, lpm: 120, phasingSeconds: 1, startSeconds: 1, stopSeconds: 1, trailingBlackSeconds: 0.1 }
+  const width = 905
+  const spec = { ioc: FaxIoc.Ioc288, lpm: 120, phasingSeconds: 3, startSeconds: 1, stopSeconds: 1, trailingBlackSeconds: 0.1 }
   const audio = await encodeFax(faxPattern(width, 2), width, 2, spec)
   const events = []
   const decoder = new FaxDecoder(12000, {
-    ioc: FaxIoc.Ioc288, lpm: 120, expectedPhasingSeconds: 1,
+    ioc: FaxIoc.Ioc288, lpm: 120, expectedPhasingSeconds: 3,
     aptConfirmSeconds: 0.2, acquisitionTimeoutSeconds: 5,
     stopConfirmSeconds: 0.2, signalLossSeconds: 2, minimumCarrierCoherence: 0,
   }, event => events.push(event))
@@ -123,7 +123,7 @@ test('continuousPaper fax prints without APT and signal loss only inserts a boun
 })
 
 test('continuousPaper fax self-decodes APT start and stop', async () => {
-  const width = 864
+  const width = 905
   const height = 4
   const spec = {
     ioc: FaxIoc.Ioc288,

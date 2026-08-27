@@ -168,7 +168,6 @@ export interface FaxSpecOptions {
   startSeconds?: number
   stopSeconds?: number
   trailingBlackSeconds?: number
-  deadSectorFraction?: number
 }
 
 export interface SstvDecodeNotification {
