@@ -1,6 +1,6 @@
 {
   "name": "rasterwave-node-win32-x64-msvc",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "cpu": [
     "x64"
   ],
@@ -8,10 +8,11 @@
   "files": [
     "rasterwave-node.win32-x64-msvc.node"
   ],
-  "description": "Native streaming SSTV and radiofax encoder/decoder for Node.js",
+  "description": "Native streaming SSTV, radiofax and RTTY encoder/decoder for Node.js",
   "keywords": [
     "sstv",
     "radiofax",
+    "rtty",
     "wefax",
     "ham-radio",
     "node-api"

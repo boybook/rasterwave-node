@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0
+
+- Upgrade to `rasterwave` 0.6.0 and expose its RTTY modem.
+- `RttyEncoder`: synchronous interactive encoder (`pushText`, `retractUnsent`,
+  `clearUnsent`, `finish`, `abort`, `readSamples`) that reports committed
+  characters with sample positions.
+- `RttyDecoder`: queued decoder with backpressure, `retune`, `setSquelch`,
+  `updateSettings` (AFC, USOS, character set, lanes, auto-reverse),
+  `markDiscontinuity(droppedInputSamples)`, a noise blanker option, character
+  events with confidence and periodic signal reports (`snrDb` calibrated to a
+  3 kHz bandwidth, per-tone `markDb`/`spaceDb` levels).
+  - Control calls are validated in full before they are queued and throw
+    `RASTERWAVE_INVALID_ARGUMENT` (including a `retune` whose shift is outside
+    20..=1200 Hz and invalid `updateSettings` lanes or character set); a queued
+    control command can no longer fail the session.
+  - `markDiscontinuity` travels through the queue in order with the audio, so
+    it never shifts audio queued before the call, is never lost when the queue
+    is full, and `reset()` discards only gaps declared before it.
+- `rttyProfiles()` lists the catalog profiles.
+- `RttyScanner`: queued wideband RTTY signal browser with backpressure that
+  reports tracked channels (`channels` every ~500 ms with stable ids, centre,
+  shift, score, SNR, lock and polarity), per-channel preview text (`text`) and
+  `removed` events. Events are discriminated on `type`, like the decoder
+  events, and share their `drain`/`finished`/`error` control events.
+- Calling `dispose()` again while a dispose is pending resolves every call.
+- `preambleLtrs` and `tailLtrs` are documented as integers in 0..=32.
+
 ## 0.5.0
 
 - Upgrade to `rasterwave` 0.5.0 with stable phasing-calibrated FAX rows.

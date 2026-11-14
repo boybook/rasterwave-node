@@ -20,6 +20,61 @@ export declare class FaxEncoder {
   get progress(): FaxEncoderProgressSnapshot
 }
 
+export declare class RttyDecoder {
+  constructor(inputSampleRate: number, options: RttyDecoderOptions | undefined | null, onEvent: (arg: RttyDecodeNotification) => void)
+  /** Queues PCM. Returns `false` (and drops nothing) when the queue is full. */
+  pushF32(input: Float32Array): boolean
+  /** Validated in full before queueing, so the worker cannot reject it. */
+  retune(markHz: number, spaceHz: number): boolean
+  setSquelch(squelch: number): boolean
+  /** Changes receive settings in order with queued audio. Omitted fields keep their value. */
+  updateSettings(settings: RttyDecoderSettings): boolean
+  reset(): boolean
+  /**
+   * Declares that `droppedInputSamples` samples were lost between the audio
+   * queued before this call and the audio queued after it.
+   *
+   * Always accepted: the count is queued in order with the audio, merged
+   * into a marker already at the end of the queue, and allowed past the
+   * operation limit otherwise (merging keeps that bounded), so a full queue
+   * never loses timeline information.
+   */
+  markDiscontinuity(droppedInputSamples: number): boolean
+  drain(): object
+  finish(): object
+  dispose(): object
+  get queuedSamples(): number
+}
+
+export declare class RttyEncoder {
+  constructor(sampleRate: number, options?: RttyEncoderOptions | undefined | null)
+  pushText(text: string): RttyPushResult
+  retractUnsent(count: number): number
+  clearUnsent(): number
+  finish(): void
+  abort(): void
+  readSamples(maxSamples: number): RttyReadResult
+  dispose(): void
+  get pendingText(): string
+  get pendingLength(): number
+  get isFinished(): boolean
+  get isFinishing(): boolean
+  get samplesRendered(): number
+  get sampleRate(): number
+}
+
+export declare class RttyScanner {
+  constructor(inputSampleRate: number, options: RttyScannerOptions | undefined | null, onEvent: (arg: RttyScanNotification) => void)
+  /** Queues PCM. Returns `false` (and drops nothing) when the queue is full. */
+  pushF32(input: Float32Array): boolean
+  /** Forgets every channel, in order with queued audio. Channel ids keep counting up. */
+  reset(): boolean
+  drain(): object
+  finish(): object
+  dispose(): object
+  get queuedSamples(): number
+}
+
 export declare class SstvDecoder {
   constructor(inputSampleRate: number, options: SstvDecoderOptions | undefined | null, onEvent: (arg: SstvDecodeNotification) => void)
   pushF32(input: Float32Array): boolean
@@ -168,6 +223,132 @@ export interface FaxSpecOptions {
   startSeconds?: number
   stopSeconds?: number
   trailingBlackSeconds?: number
+}
+
+export interface RttyDecodeNotification {
+  type: string
+  ch?: string
+  code?: number
+  confidence?: number
+  startSample?: number
+  lane?: string
+  reversed?: boolean
+  sample?: number
+  locked?: boolean
+  snrDb?: number
+  markDb?: number
+  spaceDb?: number
+  frequencyOffsetHz?: number
+  reason?: string
+}
+
+export interface RttyDecoderOptions {
+  baud?: number
+  shiftHz?: number
+  stopBits?: number
+  markHz?: number
+  spaceHz?: number
+  characterSet?: string
+  usos?: boolean
+  afc?: boolean
+  afcRangeHz?: number
+  squelch?: number
+  lanes?: Array<string>
+  autoReverse?: boolean
+  signalReportMs?: number
+  noiseBlanker?: boolean
+  queueCapacitySamples?: number
+}
+
+export interface RttyDecoderSettings {
+  afc?: boolean
+  usos?: boolean
+  characterSet?: string
+  lanes?: Array<string>
+  autoReverse?: boolean
+}
+
+export interface RttyEncoderOptions {
+  baud?: number
+  shiftHz?: number
+  stopBits?: number
+  markHz?: number
+  spaceHz?: number
+  characterSet?: string
+  amplitude?: number
+  preambleMarkMs?: number
+  preambleLtrs?: number
+  idle?: string
+  tailLtrs?: number
+  tailMarkMs?: number
+  transitionMs?: number
+  envelopeMs?: number
+  expandNewline?: boolean
+}
+
+export interface RttyProfileInfo {
+  id: string
+  baud: number
+  shiftHz: number
+  stopBits: number
+}
+
+export declare function rttyProfiles(): Array<RttyProfileInfo>
+
+export interface RttyPushResult {
+  accepted: number
+  firstSeq?: number
+  rejected: string
+}
+
+export interface RttyReadResult {
+  samples: Float32Array
+  rendered: Array<RttyRenderedCharacter>
+  finished: boolean
+}
+
+export interface RttyRenderedCharacter {
+  seq: number
+  ch: string
+  startSample: number
+  endSample: number
+}
+
+export interface RttyScanChannelInfo {
+  id: number
+  centerHz: number
+  shiftHz: number
+  score: number
+  snrDb: number
+  reversed: boolean
+  locked: boolean
+}
+
+export interface RttyScanCharacter {
+  ch: string
+  confidence: number
+  startSample: number
+}
+
+export interface RttyScannerOptions {
+  shiftsHz?: Array<number>
+  minHz?: number
+  maxHz?: number
+  maxChannels?: number
+  minScore?: number
+  baud?: number
+  shiftHz?: number
+  stopBits?: number
+  queueCapacitySamples?: number
+}
+
+export interface RttyScanNotification {
+  type: string
+  sample?: number
+  channels?: Array<RttyScanChannelInfo>
+  channelId?: number
+  characters?: Array<RttyScanCharacter>
+  reason?: string
 }
 
 export interface SstvDecodeNotification {

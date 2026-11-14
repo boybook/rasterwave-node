@@ -24,3 +24,7 @@ module.exports.SstvMode = SstvMode
 module.exports.FaxIoc = FaxIoc
 module.exports.FaxPolarity = FaxPolarity
 module.exports.sstvModes = native.sstvModes
+module.exports.RttyEncoder = native.RttyEncoder
+module.exports.RttyDecoder = native.RttyDecoder
+module.exports.RttyScanner = native.RttyScanner
+module.exports.rttyProfiles = native.rttyProfiles

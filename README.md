@@ -123,6 +123,79 @@ const encoder = new FaxEncoder(
 
 See [`index.d.ts`](./index.d.ts) for the complete event and configuration API.
 
+## RTTY
+
+```js
+const { RttyEncoder, RttyDecoder } = require('rasterwave-node')
+
+// Synchronous: calls run in program order, so retraction never races a read.
+const encoder = new RttyEncoder(12000, { markHz: 2125, spaceHz: 2295 })
+encoder.pushText('CQ CQ DE N0CALL K')
+const { samples, rendered } = encoder.readSamples(1200) // rendered: committed characters
+encoder.retractUnsent(1) // only characters not yet committed
+encoder.finish()
+
+const decoder = new RttyDecoder(12000, { squelch: 0.25 }, event => {
+  if (event.type === 'character') process.stdout.write(event.ch)
+})
+decoder.pushF32(samples) // false means the queue is full: await decoder.drain()
+```
+
+The encoder sends LTRS diddles while its buffer is empty and only ends after
+`finish()` or `abort()` (`abort()` also cuts a tail already started by
+`finish()`). Tones are audio frequencies; choose mark above or below space
+according to the radio sideband.
+
+Decoder control calls (`retune`, `setSquelch`, `updateSettings`, `reset`,
+`markDiscontinuity`) are validated synchronously, throwing
+`RASTERWAVE_INVALID_ARGUMENT`, and then queued in order with the audio.
+`markDiscontinuity(n)` declares `n` lost samples between the audio pushed
+before and after the call; it is always accepted, even while the queue is full.
+
+`signal` events report `snrDb`, the SNR in a 3 kHz bandwidth measured at the bit
+centres of decoded characters (within about 1 dB of the true value from −12 to
++40 dB on white noise; around −13 to −16 dB for noise alone), and `markDb` /
+`spaceDb`, fast per-tone levels for tuning and tone balance that saturate near
+15–16 dB. Digital silence (for example a receiver muted during transmit) freezes
+the decoder's level estimates, so noise after the silence is not mistaken for a
+signal.
+
+### RTTY signal browser
+
+`RttyScanner` searches the whole audio passband for RTTY signals and decodes a
+short preview of each, so a user can pick one and tune the main decoder there.
+It uses the same queue, backpressure and `drain`/`finish`/`dispose` contract as
+the decoders.
+
+```js
+const { RttyScanner } = require('rasterwave-node')
+
+const scanner = new RttyScanner(12000, { shiftsHz: [170, 425], maxChannels: 8 }, event => {
+  switch (event.type) {
+    case 'channels': // every ~500 ms, ordered by centre, also when empty
+      for (const c of event.channels) console.log(c.id, c.centerHz, c.shiftHz, c.score, c.snrDb, c.locked, c.reversed)
+      break
+    case 'text': // preview characters for one channel
+      console.log(event.channelId, event.characters.map(c => c.ch).join(''))
+      break
+    case 'removed': // the id will not appear again
+      console.log('gone', event.channelId)
+      break
+  }
+})
+scanner.pushF32(samples) // false: await scanner.drain() and retry
+```
+
+Detection compares the energy of tone pairs one shift apart over the last
+1.5 s: RTTY moves its energy between mark and space, which separates it from
+two carriers or voice. A candidate is reported after about a second of stable
+detection and dropped three seconds after it disappears; ids are never reused.
+`reversed: false` means mark is the lower audio tone, so the main decoder can be
+tuned with `markHz = centerHz - shiftHz / 2` and `spaceHz = centerHz + shiftHz / 2`
+(swap them when `reversed` is true). Options: `minHz`/`maxHz` bound both tones
+(default 300 to 2900 Hz), `minScore` (default 0.5), and `baud`/`shiftHz`/
+`stopBits` configure the preview decoders (`shiftsHz` defaults to `[shiftHz]`).
+
 ## Concurrency and memory
 
 - A process-wide Rust pool uses up to four threads.
